@@ -17,16 +17,19 @@
 #include <condition_variable>
 #include <cstring>
 
-inline bool set_nonblocking(int fd) {
-    if (fd < 0) {
-        return false;
-    }
+namespace simple { namespace ipc {
 
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags == -1) {
-        return false;
-    }
+        inline bool set_nonblocking(int fd) {
+            if (fd < 0) {
+                return false;
+            }
 
-    flags |= O_NONBLOCK;
-    return fcntl(fd, F_SETFL, flags) == 0;
-}
+            int flags = fcntl(fd, F_GETFL, 0);
+            if (flags == -1) {
+                return false;
+            }
+
+            flags |= O_NONBLOCK;
+            return fcntl(fd, F_SETFL, flags) == 0;
+        }
+}}
