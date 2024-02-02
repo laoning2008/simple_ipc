@@ -35,7 +35,8 @@ namespace simple { namespace ipc {
             linear_ringbuffer_t s_buf;
         };
 
-        static const size_t rw_buf_len = 1024 * 1024;
+        constexpr static const size_t rw_buf_len = 1024 * 1024;
+        constexpr static const uint32_t active_connection_lifetime_seconds = 60;
 
         static size_t cal_mem_size() {
             static const size_t PAGE_SIZE = sysconf(_SC_PAGESIZE);
@@ -60,12 +61,12 @@ namespace simple { namespace ipc {
             using disconnected_callback_t = std::function<void(connection_t* conn, uint32_t process_id)>;
             using receive_push_callback_t = std::function<void(connection_t* conn, std::unique_ptr<packet>)>;
         public:
-            connection_t(bool server
+            connection_t(bool server, timer_mgr_t& t
                          , disconnected_callback_t disconnected_cb
                          , receive_push_callback_t receive_req_cb
                          , got_process_id_callback_t got_process_id_cb
                          , uint32_t proc_id = 0)
-            : is_server(server), control_block(nullptr)
+            : is_server(server), timer(t), control_block(nullptr)
             , writing_thread_stopped(false), reading_thread_stopped(false)
             , last_recv_time(std::chrono::steady_clock::now())
             , disconnected_callback(disconnected_cb)
@@ -359,8 +360,18 @@ namespace simple { namespace ipc {
                     }
                 }
             }
+
+            void on_timer() {
+                auto now = std::chrono::steady_clock::now();
+                auto elapse = std::chrono::duration_cast<std::chrono::seconds>(now - last_recv_time).count();
+                if (elapse > active_connection_lifetime_seconds) {
+                    disconnected_callback(this, process_id);
+                }
+            }
         private:
             bool is_server;
+            timer_mgr_t& timer;
+
             control_block_t *control_block;
 
             packet_list_t waiting_for_sending_packets;

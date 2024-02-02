@@ -4,6 +4,7 @@
 #include <list>
 #include <atomic>
 #include "connection.hpp"
+#include "timer.hpp"
 
 using namespace std::placeholders;
 
@@ -28,7 +29,7 @@ namespace simple { namespace ipc {
                     return -1;
                 }
 
-                auto connection = std::make_unique<connection_t>(true
+                auto connection = std::make_unique<connection_t>(true, timer
                         , std::bind(&connection_mgr_t::on_disconnected, this, _1, _2)
                         , std::bind(&connection_mgr_t::on_recv_push, this, _1, _2)
                         , std::bind(&connection_mgr_t::on_got_process_id, this, _1, _2));
@@ -129,6 +130,8 @@ namespace simple { namespace ipc {
 
 
         private:
+            timer_mgr_t timer;
+
             connection_list_t temp_connections;
             std::mutex temp_connections_mutex;
 

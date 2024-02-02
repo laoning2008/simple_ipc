@@ -91,11 +91,11 @@ static uint64_t packet_id(const std::unique_ptr<packet>& pack) {
     return packet_id(pack->cmd(), pack->seq());
 }
 
-static std::unique_ptr<packet> build_req_packet(uint32_t process_id, uint32_t cmd, uint8_t* body_buf = nullptr, uint32_t body_len = 0, std::string device_id = {}) {
+static std::unique_ptr<packet> build_req_packet(uint32_t process_id, uint32_t cmd, uint8_t* body_buf = nullptr, uint32_t body_len = 0) {
     return std::make_unique<packet>(process_id, cmd, false, body_buf, body_len, 0);
 }
 
-static std::unique_ptr<packet> build_rsp_packet(uint32_t process_id, uint32_t cmd, uint32_t seq, uint32_t ec, std::string device_id, uint8_t* body_buf, uint32_t body_len) {
+static std::unique_ptr<packet> build_rsp_packet(uint32_t process_id, uint32_t cmd, uint32_t seq, uint32_t ec, uint8_t* body_buf, uint32_t body_len) {
     return std::make_unique<packet>(process_id, cmd, true, body_buf, body_len, seq, ec);
 }
 

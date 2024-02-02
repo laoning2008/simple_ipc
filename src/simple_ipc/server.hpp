@@ -13,7 +13,7 @@ namespace simple { namespace ipc {
             }
 
             bool send_packet(uint32_t process_id, std::unique_ptr<packet> pack) {
-                retutn conn_mgr.send_packet(process_id, std::move(pack));
+                return conn_mgr.send_packet(process_id, std::move(pack));
             }
 
             bool send_packet(uint32_t process_id, std::unique_ptr<packet> pack, recv_callback_t cb) {

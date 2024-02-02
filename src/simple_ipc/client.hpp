@@ -8,19 +8,22 @@
 
 #include "connector.hpp"
 #include "connection.hpp"
+#include "timer.hpp"
 
 using namespace std::placeholders;
 
 namespace simple { namespace ipc {
         class client_t {
+            constexpr static uint32_t heartbeat_cmd = 0;
         public:
             using recv_callback_t = std::function<void(std::unique_ptr<packet> pack)>;
             using map_cmd_2_callback_t = std::unordered_map<uint32_t, recv_callback_t >;
         public:
             client_t(std::string server_name)
-            : connector(server_name, std::bind(&client_t::on_connected, this, _1))
-            , connection(false, std::bind(&client_t::on_disconnected, this, _1, _2)
-                    ,std::bind(&client_t::on_recv_push, this, _1, _2), nullptr, getpid()) {
+            : process_id(getpid())
+            , connector(server_name, std::bind(&client_t::on_connected, this, _1))
+            , connection(false, timer, std::bind(&client_t::on_disconnected, this, _1, _2)
+                    ,std::bind(&client_t::on_recv_push, this, _1, _2), nullptr, process_id) {
             }
 
             ~client_t() {
@@ -66,9 +69,16 @@ namespace simple { namespace ipc {
                     it->second(std::move(pack));
                 }
             }
+
+            void on_heartbeat_timer() {
+                auto heartbeat_pack = build_req_packet(process_id, heartbeat_cmd, nullptr, 0);
+                connection.send_packet(std::move(heartbeat_pack));
+            }
         private:
+            uint32_t process_id;
             connector_t connector;
             connection_t connection;
+            timer_mgr_t timer;
 
             map_cmd_2_callback_t push_callbacks;
             std::mutex push_callbacks_mutex;
