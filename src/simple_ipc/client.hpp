@@ -21,13 +21,15 @@ namespace simple { namespace ipc {
         public:
             client_t(std::string server_name)
             : process_id(getpid())
+            , timer_id(-1)
             , connector(server_name, std::bind(&client_t::on_connected, this, _1))
             , connection(false, timer, std::bind(&client_t::on_disconnected, this, _1, _2)
                     ,std::bind(&client_t::on_recv_push, this, _1, _2), nullptr, process_id) {
+                timer.start();
+                timer_id = timer.start_timer(std::bind(&client_t::on_heartbeat_timer, this), 3*1000, false);
             }
 
             ~client_t() {
-
             }
 
             void send_packet(std::unique_ptr<packet> pack) {
@@ -76,9 +78,12 @@ namespace simple { namespace ipc {
             }
         private:
             uint32_t process_id;
+
             connector_t connector;
             connection_t connection;
+
             timer_mgr_t timer;
+            int timer_id;
 
             map_cmd_2_callback_t push_callbacks;
             std::mutex push_callbacks_mutex;

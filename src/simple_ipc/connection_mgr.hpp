@@ -9,7 +9,6 @@
 using namespace std::placeholders;
 
 namespace simple { namespace ipc {
-        const static char *g_memfd_name = "simple_ipc";
 
         class connection_mgr_t {
         public:
@@ -23,12 +22,7 @@ namespace simple { namespace ipc {
             ~connection_mgr_t() {
             }
 
-            int new_connection() {
-                auto fd = memfd_create(g_memfd_name, MFD_CLOEXEC);
-                if (fd == -1) {
-                    return -1;
-                }
-
+            bool new_connection(int fd) {
                 auto connection = std::make_unique<connection_t>(true, timer
                         , std::bind(&connection_mgr_t::on_disconnected, this, _1, _2)
                         , std::bind(&connection_mgr_t::on_recv_push, this, _1, _2)
@@ -36,7 +30,7 @@ namespace simple { namespace ipc {
 
                 if (!connection->set_fd(fd)) {
                     close(fd);
-                    return -1;
+                    return false;
                 }
 
                 {
@@ -44,12 +38,12 @@ namespace simple { namespace ipc {
                     temp_connections.push_back(std::move(connection));
                 }
 
-                return fd;
+                return true;
             }
 
-            void remove_connection(uint64_t id) {
+            void remove_connection(uint32_t process_id) {
                 std::unique_lock<std::mutex> lk(connections_mutex);
-                connections.erase(id);
+                connections.erase(process_id);
             }
 
             bool send_packet(uint32_t process_id, std::unique_ptr<packet> pack) {

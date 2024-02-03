@@ -26,36 +26,41 @@ namespace simple::ipc {
             using callback_t = std::function<void(int fd)>;
         public:
             connector_t(std::string server_name, callback_t callback)
-                    : s_name(std::move(server_name)), cb(std::move(callback)), should_stop(false) {
+                    : s_name(std::move(server_name)), cb(std::move(callback)), should_stop(true) {
+                start();
             }
 
             ~connector_t() {
                 stop();
             }
 
+            void start_connect() {
+                cond.notify_one();
+            }
+        private:
             void start() {
-                stop();
-
+                if (!should_stop) {
+                    return;
+                }
                 should_stop = false;
+
                 thread = std::thread([this]() {
                     worker_proc();
                 });
             }
 
             void stop() {
+                if (should_stop) {
+                    return;
+                }
                 should_stop = true;
-                cond.notify_one();
 
+                cond.notify_one();
                 if (thread.joinable()) {
                     thread.join();
                 }
             }
 
-            void start_connect() {
-                cond.notify_one();
-            }
-
-        private:
             void worker_proc() {
                 while (!should_stop) {
                     std::unique_lock lk(mutex);

@@ -29,37 +29,41 @@
 namespace simple { namespace ipc {
 
         class listener_t {
+            constexpr static char *memfd_name = "simple_ipc";
         public:
             class construct_failed_exception : public std::exception {
             };
-
-            class invalid_state_exception : public std::exception {
-            };
-
         public:
             using callback_t = std::function<void(int fd)>;
         public:
             listener_t(std::string server_name, callback_t callback)
-                    : s_name(std::move(server_name)), cb(std::move(callback)), should_stop(false), sock_fd(-1) {
+                    : s_name(std::move(server_name)), cb(std::move(callback)), should_stop(true), sock_fd(-1) {
                 if (!init_listen()) {
                     throw construct_failed_exception{};
                 }
+
+                start();
             }
 
             ~listener_t() {
                 stop();
             }
-
+        private:
             void start() {
-                stop();
-
+                if (!should_stop) {
+                    return;
+                }
                 should_stop = false;
+
                 thread = std::thread([this]() {
                     worker_proc();
                 });
             }
 
             void stop() {
+                if (should_stop) {
+                    return;
+                }
                 should_stop = true;
 
                 if (thread.joinable()) {
@@ -67,7 +71,6 @@ namespace simple { namespace ipc {
                 }
             }
 
-        private:
             void worker_proc() {
                 int epoll_fd = epoll_create(1);
                 if (epoll_fd == -1) {
@@ -109,12 +112,13 @@ namespace simple { namespace ipc {
                         continue;
                     }
 
-                    int mem_fd = conn_mgr.new_connection();
+                    auto mem_fd = memfd_create(memfd_name, MFD_CLOEXEC);
                     if (mem_fd == -1) {
                         continue;
                     }
 
                     send_fd(conn, mem_fd);
+                    cb(mem_fd);
                     close(mem_fd);
                 }
 
@@ -177,11 +181,6 @@ namespace simple { namespace ipc {
 
                 return sock_fd != -1;
             }
-
-            void fire_callback(int fd) {
-                cb(fd);
-            }
-
         private:
             std::string s_name;
             callback_t cb;

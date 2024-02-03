@@ -66,7 +66,7 @@ namespace simple { namespace ipc {
                          , receive_push_callback_t receive_req_cb
                          , got_process_id_callback_t got_process_id_cb
                          , uint32_t proc_id = 0)
-            : is_server(server), timer(t), control_block(nullptr)
+            : is_server(server), inited(false), timer(t), timer_id(-1), control_block(nullptr)
             , writing_thread_stopped(false), reading_thread_stopped(false)
             , last_recv_time(std::chrono::steady_clock::now())
             , disconnected_callback(disconnected_cb)
@@ -128,10 +128,16 @@ namespace simple { namespace ipc {
                     read_proc();
                 });
 
+                timer.start_timer(std::bind(&connection_t::on_timer, this), 1000, false);
+
+                inited = true;
                 return true;
             }
 
             void stop() {
+                timer.stop_timer(timer_id);
+                timer_id = -1;
+
                 writing_thread_stopped = true;
                 reading_thread_stopped = true;
                 waiting_for_sending_packets_cond.notify_one();
@@ -142,8 +148,11 @@ namespace simple { namespace ipc {
                     reading_thread.join();
                 }
 
-                destroy_synchronization_objects();
-                munmap(control_block, mm_len);
+                if (inited) {
+                    destroy_synchronization_objects();
+                    munmap(control_block, mm_len);
+                    inited = false;
+                }
             }
 
             void *map_shared_memory(int mem_fd) {
@@ -153,7 +162,7 @@ namespace simple { namespace ipc {
                     }
                 }
 
-                void *shared_mem = mmap(nullptr, mm_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+                void *shared_mem = mmap(nullptr, mm_len, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, 0);
                 if (shared_mem == MAP_FAILED) {
                     return nullptr;
                 }
@@ -370,7 +379,10 @@ namespace simple { namespace ipc {
             }
         private:
             bool is_server;
+            bool inited;
+
             timer_mgr_t& timer;
+            int timer_id;
 
             control_block_t *control_block;
 
