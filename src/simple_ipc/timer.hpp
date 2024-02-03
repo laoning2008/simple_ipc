@@ -17,7 +17,7 @@ namespace simple::ipc {
                 bool one_shot;
                 callback_t callback;
 
-                timer_t(bool once = true, callback_t cb = nullptr)
+                explicit timer_t(bool once = true, callback_t cb = nullptr)
                         : one_shot(once), callback(std::move(cb)) {}
             };
 

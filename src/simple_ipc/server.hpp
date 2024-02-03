@@ -11,10 +11,6 @@ namespace simple::ipc {
 
             }
 
-            ~server_t() {
-
-            }
-
             bool send_packet(std::unique_ptr<packet> pack) {
                 return conn_mgr.send_packet(std::move(pack));
             }

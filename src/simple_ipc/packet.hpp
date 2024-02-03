@@ -30,8 +30,6 @@ constexpr static uint32_t header_length = sizeof(packet_header);
 constexpr static uint32_t max_body_length = 16*1024;
 
 class packet {
-    friend ibuffer encode_packet(const packet& pack);
-    friend std::unique_ptr<packet> decode_packet(uint8_t* buf, size_t buf_len, size_t& consume_len);
 public:
     packet() : process_id_(0), cmd_(0), seq_(0), rsp_(false), ec_(0) {
     }
@@ -64,7 +62,7 @@ public:
         return body_;
     }
 private:
-    uint32_t next_seq() {
+    static uint32_t next_seq() {
         if (seq_generator == UINT_MAX) {
             seq_generator = 0;
         }

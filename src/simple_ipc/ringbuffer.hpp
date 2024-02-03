@@ -15,11 +15,8 @@ namespace simple::ipc {
             typedef value_type *iterator;
             typedef const value_type *const_iterator;
 
-            linear_ringbuffer_t(unsigned char *buf = nullptr, size_t capacity = 0) noexcept
+            explicit linear_ringbuffer_t(unsigned char *buf = nullptr, size_t capacity = 0) noexcept
                     : buffer_(buf), capacity_(capacity), head_(0), tail_(0), size_(0) {}
-
-            ~linear_ringbuffer_t() {
-            }
 
             linear_ringbuffer_t(linear_ringbuffer_t &&other) noexcept {
                 linear_ringbuffer_t tmp{};
@@ -62,31 +59,31 @@ namespace simple::ipc {
             }
 
 
-            size_t size() const noexcept {
+            [[nodiscard]] size_t size() const noexcept {
                 return size_;
             }
 
-            bool empty() const noexcept {
+            [[nodiscard]] bool empty() const noexcept {
                 return size_ == 0;
             }
 
-            size_t capacity() const noexcept {
+            [[nodiscard]] size_t capacity() const noexcept {
                 return capacity_;
             }
 
-            size_t free_size() const noexcept {
+            [[nodiscard]] size_t free_size() const noexcept {
                 return capacity_ - size_;
             }
 
-            const_iterator cbegin() const noexcept {
+            [[nodiscard]] const_iterator cbegin() const noexcept {
                 return buffer_ + head_;
             }
 
-            const_iterator begin() const noexcept {
+            [[nodiscard]] const_iterator begin() const noexcept {
                 return cbegin();
             }
 
-            const_iterator cend() const noexcept {
+            [[nodiscard]] const_iterator cend() const noexcept {
                 // Fix up `end` if needed so that [begin, end) is always a
                 // valid range.
                 return head_ < tail_ ?
@@ -94,7 +91,7 @@ namespace simple::ipc {
                        buffer_ + tail_ + capacity_;
             }
 
-            const_iterator end() const noexcept {
+            [[nodiscard]] const_iterator end() const noexcept {
                 return cend();
             }
 
@@ -107,11 +104,11 @@ namespace simple::ipc {
                 swap(size_, other.size_);
             }
         private:
-            unsigned char *buffer_;
-            size_t capacity_;
-            size_t head_;
-            size_t tail_;
-            size_t size_;
+            unsigned char *buffer_{};
+            size_t capacity_{};
+            size_t head_{};
+            size_t tail_{};
+            size_t size_{};
         };
 
 
