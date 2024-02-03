@@ -1,14 +1,16 @@
 #pragma once
-#include <functional>
+
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 #include <sys/eventfd.h>
+
+#include <functional>
 #include <thread>
 #include <mutex>
 #include <atomic>
 #include <unordered_map>
 
-namespace simple { namespace ipc {
+namespace simple::ipc {
         class timer_mgr_t {
             using callback_t = std::function<void()>;
             struct timer_t {
@@ -190,4 +192,4 @@ namespace simple { namespace ipc {
             volatile std::atomic<bool> to_stop;
             std::thread worker;
         };
-    }}
+    }

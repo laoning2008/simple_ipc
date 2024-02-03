@@ -1,11 +1,11 @@
 #pragma once
 
-#include <assert.h>
 #include <cstdint>
 #include <stdexcept>
 #include <unistd.h>
+#include <cassert>
 
-namespace simple { namespace ipc {
+namespace simple::ipc {
 
         class linear_ringbuffer_t {
         public:
@@ -119,4 +119,4 @@ namespace simple { namespace ipc {
             lhs.swap(rhs);
         }
 
-}}
+}

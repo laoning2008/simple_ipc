@@ -12,7 +12,7 @@
 
 using namespace std::placeholders;
 
-namespace simple { namespace ipc {
+namespace simple::ipc {
         class client_t {
             constexpr static uint32_t heartbeat_cmd = 0;
         public:
@@ -24,10 +24,9 @@ namespace simple { namespace ipc {
             , timer_id(-1)
             , connector(server_name, std::bind(&client_t::on_connected, this, _1))
             , connection(false, timer, std::bind(&client_t::on_disconnected, this, _1, _2)
-                    ,std::bind(&client_t::on_recv_push, this, _1, _2), nullptr, process_id) {
+                    ,std::bind(&client_t::on_recv_req, this, _1, _2), nullptr, process_id) {
                 timer.start();
                 timer_id = timer.start_timer(std::bind(&client_t::on_heartbeat_timer, this), 3*1000, false);
-                connector.start_connect();
             }
 
             ~client_t() {
@@ -45,30 +44,30 @@ namespace simple { namespace ipc {
                 connection.cancel_sending(cmd, seq);
             }
 
-            void register_push_receiver(uint32_t cmd, recv_callback_t cb) {
-                std::unique_lock<std::mutex> lk(push_callbacks_mutex);
-                push_callbacks[cmd] = cb;
+            void register_request_processor(uint32_t cmd, recv_callback_t cb) {
+                std::unique_lock<std::mutex> lk(req_processors_mutex);
+                req_processors[cmd] = cb;
             }
 
-            void unregister_push_receiver(uint32_t cmd) {
-                std::unique_lock<std::mutex> lk(push_callbacks_mutex);
-                push_callbacks.erase(cmd);
+            void unregister_request_processor(uint32_t cmd) {
+                std::unique_lock<std::mutex> lk(req_processors_mutex);
+                req_processors.erase(cmd);
             }
         private:
             void on_connected(int fd) {
                 if (!connection.set_fd(fd) || fd == -1) {
-                    connector.start_connect();
+                    connector.reconnect();
                 }
             }
 
             void on_disconnected(connection_t* conn, uint32_t process_id) {
-                connector.start_connect();
+                connector.reconnect();
             }
 
-            void on_recv_push(connection_t* conn,  std::unique_ptr<packet> pack) {
-                std::unique_lock<std::mutex> lk(push_callbacks_mutex);
-                auto it = push_callbacks.find(pack->cmd());
-                if (it != push_callbacks.end()) {
+            void on_recv_req(connection_t* conn,  std::unique_ptr<packet> pack) {
+                std::unique_lock<std::mutex> lk(req_processors_mutex);
+                auto it = req_processors.find(pack->cmd());
+                if (it != req_processors.end()) {
                     it->second(std::move(pack));
                 }
             }
@@ -86,8 +85,8 @@ namespace simple { namespace ipc {
             timer_mgr_t timer;
             int timer_id;
 
-            map_cmd_2_callback_t push_callbacks;
-            std::mutex push_callbacks_mutex;
+            map_cmd_2_callback_t req_processors;
+            std::mutex req_processors_mutex;
         };
 
-}}
+}

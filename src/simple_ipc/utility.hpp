@@ -17,7 +17,7 @@
 #include <condition_variable>
 #include <cstring>
 
-namespace simple { namespace ipc {
+namespace simple::ipc {
 
         inline bool set_nonblocking(int fd) {
             if (fd < 0) {
@@ -32,4 +32,4 @@ namespace simple { namespace ipc {
             flags |= O_NONBLOCK;
             return fcntl(fd, F_SETFL, flags) == 0;
         }
-}}
+}

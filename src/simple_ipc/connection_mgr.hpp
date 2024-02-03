@@ -3,12 +3,13 @@
 #include <unordered_map>
 #include <list>
 #include <atomic>
+
 #include "connection.hpp"
 #include "timer.hpp"
 
 using namespace std::placeholders;
 
-namespace simple { namespace ipc {
+namespace simple::ipc {
 
         class connection_mgr_t {
         public:
@@ -25,7 +26,7 @@ namespace simple { namespace ipc {
             bool new_connection(int fd) {
                 auto connection = std::make_unique<connection_t>(true, timer
                         , std::bind(&connection_mgr_t::on_disconnected, this, _1, _2)
-                        , std::bind(&connection_mgr_t::on_recv_push, this, _1, _2)
+                        , std::bind(&connection_mgr_t::on_recv_req, this, _1, _2)
                         , std::bind(&connection_mgr_t::on_got_process_id, this, _1, _2));
 
                 if (!connection->set_fd(fd)) {
@@ -46,7 +47,8 @@ namespace simple { namespace ipc {
                 connections.erase(process_id);
             }
 
-            bool send_packet(uint32_t process_id, std::unique_ptr<packet> pack) {
+            bool send_packet(std::unique_ptr<packet> pack) {
+                uint32_t process_id = pack->process_id();
                 std::unique_lock<std::mutex> lk(connections_mutex);
                 auto it = connections.find(process_id);
                 if (it == connections.end()) {
@@ -57,7 +59,8 @@ namespace simple { namespace ipc {
                 return true;
             }
 
-            bool send_packet(uint32_t process_id, std::unique_ptr<packet> pack, recv_callback_t cb) {
+            bool send_packet(std::unique_ptr<packet> pack, recv_callback_t cb) {
+                uint32_t process_id = pack->process_id();
                 std::unique_lock<std::mutex> lk(connections_mutex);
                 auto it = connections.find(process_id);
                 if (it == connections.end()) {
@@ -79,14 +82,14 @@ namespace simple { namespace ipc {
                 return true;
             }
 
-            void register_push_receiver(uint32_t cmd, recv_callback_t cb) {
-                std::unique_lock<std::mutex> lk(push_callbacks_mutex);
-                push_callbacks[cmd] = cb;
+            void register_request_processor(uint32_t cmd, recv_callback_t cb) {
+                std::unique_lock<std::mutex> lk(req_processors_mutex);
+                req_processors[cmd] = cb;
             }
 
-            void unregister_push_receiver(uint32_t cmd) {
-                std::unique_lock<std::mutex> lk(push_callbacks_mutex);
-                push_callbacks.erase(cmd);
+            void unregister_request_processor(uint32_t cmd) {
+                std::unique_lock<std::mutex> lk(req_processors_mutex);
+                req_processors.erase(cmd);
             }
         private:
             void on_got_process_id(connection_t* conn, uint32_t process_id) {
@@ -114,10 +117,10 @@ namespace simple { namespace ipc {
                 }
             }
 
-            void on_recv_push(connection_t* conn, std::unique_ptr<packet> pack) {
-                std::unique_lock<std::mutex> lk(push_callbacks_mutex);
-                auto it = push_callbacks.find(pack->cmd());
-                if (it != push_callbacks.end()) {
+            void on_recv_req(connection_t* conn, std::unique_ptr<packet> pack) {
+                std::unique_lock<std::mutex> lk(req_processors_mutex);
+                auto it = req_processors.find(pack->cmd());
+                if (it != req_processors.end()) {
                     it->second(std::move(pack));
                 }
             }
@@ -132,8 +135,8 @@ namespace simple { namespace ipc {
             map_process_2_connection_t connections;
             std::mutex connections_mutex;
 
-            map_cmd_2_callback_t push_callbacks;
-            std::mutex push_callbacks_mutex;
+            map_cmd_2_callback_t req_processors;
+            std::mutex req_processors_mutex;
         };
 
-    }}
+    }

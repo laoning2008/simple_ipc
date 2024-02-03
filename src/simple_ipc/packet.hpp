@@ -5,10 +5,9 @@
 #include <memory.h>
 
 #include "crc.hpp"
-#include "byte_order.hpp"
 #include "ibuffer.hpp"
 
-namespace simple { namespace ipc {
+namespace simple::ipc {
 
 static std::atomic<uint32_t> seq_generator{0};
 constexpr static uint8_t packet_begin_flag = 0x55;
@@ -42,7 +41,7 @@ public:
     }
 
     uint32_t process_id() const {
-        return cmd_;
+        return process_id_;
     }
 
     uint32_t cmd() const {
@@ -102,15 +101,15 @@ static std::unique_ptr<packet> build_rsp_packet(uint32_t process_id, uint32_t cm
 ibuffer encode_packet(const std::unique_ptr<packet>& pack) {
     auto data_len = header_length + pack->body().size();
     auto data_buf = ibuffer{data_len};
-    
-    packet_header header;
+
+    packet_header header{};
     header.flag = packet_begin_flag;
-    header.process_id = host_to_network_32(pack->process_id());
-    header.cmd = host_to_network_32(pack->cmd());
-    header.seq = host_to_network_32(pack->seq());
-    header.ec = host_to_network_32(pack->ec());
+    header.process_id = pack->process_id();
+    header.cmd = pack->cmd();
+    header.seq = pack->seq();
+    header.ec = pack->ec();
     header.rsp = pack->is_response() ? 1 : 0;
-    header.body_len = host_to_network_32(pack->body().size());
+    header.body_len = pack->body().size();
     header.crc = calc_crc8((uint8_t*)&header, header_length - 1);
     
     memcpy(data_buf.data(), &header, header_length);
@@ -145,7 +144,7 @@ std::unique_ptr<packet> decode_packet(uint8_t* buf, size_t buf_len, size_t& cons
             continue;
         }
         
-        uint32_t body_len = network_to_host_32(header->body_len);
+        uint32_t body_len = header->body_len;
         
         if (body_len > max_body_length) {
             consume_len += header_length;
@@ -157,13 +156,13 @@ std::unique_ptr<packet> decode_packet(uint8_t* buf, size_t buf_len, size_t& cons
         }
         consume_len += header_length + body_len;
 
-        uint32_t process_id = network_to_host_32(header->process_id);
-        uint32_t cmd = network_to_host_32(header->cmd);
-        uint32_t seq = network_to_host_32(header->seq);
-        uint32_t ec = network_to_host_32(header->ec);
+        uint32_t process_id = header->process_id;
+        uint32_t cmd = header->cmd;
+        uint32_t seq = header->seq;
+        uint32_t ec = header->ec;
         bool rsp = header->rsp != 0;
-        return std::make_unique<packet>(process_id, cmd, rsp, buf_valid + header_length, seq, body_len, ec);
+        return std::make_unique<packet>(process_id, cmd, rsp, buf_valid + header_length,  body_len, seq, ec);
     } while (1);
 }
 
-}}
+}

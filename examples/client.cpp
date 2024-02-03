@@ -16,12 +16,12 @@ int main(int argc, char** argv) {
 
     simple::ipc::client_t client{server_name};
     auto pid = getpid();
-    char buf[] = "hello";
+    uint8_t body[] = {'h', 'e', 'l', 'l', 'o', '\0'};
 
     while(!stoped) {
-        auto pack = simple::ipc::build_req_packet(pid, 1, (uint8_t*)buf, sizeof(buf));
-        client.send_packet(std::move(pack), [](std::unique_ptr<simple::ipc::packet> pack) {
-            std::cout << "recv rsp = " << (char*)pack->body().data() << std::endl;
+        auto pack = simple::ipc::build_req_packet(pid, 1, body, sizeof(body));
+        client.send_packet(std::move(pack), [](std::unique_ptr<simple::ipc::packet> rsp) {
+            std::cout << "recv rsp = " << (char*)rsp->body().data() << std::endl;
         });
 
         std::this_thread::sleep_for(100ms);

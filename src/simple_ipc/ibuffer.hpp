@@ -1,11 +1,8 @@
 #pragma once
-#include <stdint.h>
 #include <cassert>
-#include <memory>
 #include <memory.h>
 
-namespace simple {
-namespace ipc {
+namespace simple::ipc {
 
     class ibuffer {
     public:
@@ -82,4 +79,4 @@ namespace ipc {
         uint8_t* buf_;
         uint32_t len_;
     };
-}}
+}

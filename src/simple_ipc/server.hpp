@@ -3,7 +3,7 @@
 #include "listener.hpp"
 using namespace std::placeholders;
 
-namespace simple { namespace ipc {
+namespace simple::ipc {
         class server_t {
         public:
             server_t(std::string server_name)
@@ -16,23 +16,23 @@ namespace simple { namespace ipc {
             }
 
             bool send_packet(std::unique_ptr<packet> pack) {
-                return conn_mgr.send_packet(pack->process_id(), std::move(pack));
+                return conn_mgr.send_packet(std::move(pack));
             }
 
             bool send_packet(std::unique_ptr<packet> pack, recv_callback_t cb) {
-                return conn_mgr.send_packet(pack->process_id(), std::move(pack), cb);
+                return conn_mgr.send_packet(std::move(pack), cb);
             }
 
             bool cancel_sending(uint32_t process_id, uint32_t cmd, uint32_t seq) {
                 return conn_mgr.cancel_sending(process_id, cmd, seq);
             }
 
-            void register_push_receiver(uint32_t cmd, recv_callback_t cb) {
-                conn_mgr.register_push_receiver(cmd, cb);
+            void register_request_processor(uint32_t cmd, recv_callback_t cb) {
+                conn_mgr.register_request_processor(cmd, cb);
             }
 
-            void unregister_push_receiver(uint32_t cmd) {
-                conn_mgr.unregister_push_receiver(cmd);
+            void unregister_request_processor(uint32_t cmd) {
+                conn_mgr.unregister_request_processor(cmd);
             }
         private:
             bool on_new_connection(int fd) {
@@ -43,4 +43,4 @@ namespace simple { namespace ipc {
             connection_mgr_t conn_mgr;
         };
 
-}}
+}

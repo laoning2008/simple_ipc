@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <sys/mman.h>
 #include <unistd.h>
+
 #include <string>
 #include <functional>
 #include <memory>
@@ -13,15 +14,18 @@
 #include <thread>
 #include <unordered_map>
 #include <list>
+
 #include "ringbuffer.hpp"
 #include "packet.hpp"
-#include "defs.hpp"
 #include "timer.hpp"
 
 //todo
 //1. need to create and destroy pthread shared objects in both sides?
 //2.
-namespace simple { namespace ipc {
+namespace simple::ipc {
+    using recv_callback_t = std::function<void(std::unique_ptr<packet> pack)>;
+    using map_cmd_2_callback_t = std::unordered_map<uint32_t, recv_callback_t >;
+
         struct control_block_t {
             pthread_mutex_t c_lock;
             pthread_mutex_t s_lock;
@@ -284,16 +288,22 @@ namespace simple { namespace ipc {
                     }
 
                     auto lock = is_server ? &control_block->s_lock : &control_block->c_lock;
-                    auto cond = is_server ? &control_block->s_can_r_con : &control_block->c_can_r_con;
+                    auto cond = is_server ? &control_block->s_can_w_con : &control_block->c_can_w_con;
                     auto& shared_buf = is_server ?  control_block->s_buf : control_block->c_buf;
+                    auto cond_to_notify = is_server ? &control_block->s_can_r_con : &control_block->c_can_r_con;
 
                     pthread_mutex_lock(lock);
 
-                    for (auto& pack : waiting_for_sending_packets) {
+                    timespec ts{.tv_sec = 0, .tv_nsec = 100*1000*1000};
+
+                    while (!waiting_for_sending_packets.empty()) {
+                        auto pack = std::move(waiting_for_sending_packets.front());
+                        waiting_for_sending_packets.pop_front();
+
                         auto pack_buf = encode_packet(pack.first);
 
                         if (shared_buf.free_size() < pack_buf.size()) {
-                            pthread_cond_wait(cond, lock);
+                            pthread_cond_timedwait(cond, lock, &ts);
                         }
 
                         if (writing_thread_stopped) {
@@ -304,8 +314,12 @@ namespace simple { namespace ipc {
                             continue;
                         }
 
+                        auto pack_id = packet_id(pack.first);
+                        waiting_for_response_requests[pack_id] = pack.second;
+
                         memcpy(shared_buf.write_head(), pack_buf.data(), pack_buf.size());
                         shared_buf.commit(pack_buf.size());
+                        pthread_cond_signal(cond_to_notify);
                     }
 
                     pthread_mutex_unlock(lock);
@@ -313,18 +327,23 @@ namespace simple { namespace ipc {
             }
 
             void read_proc() {
+                timespec ts{.tv_sec = 0, .tv_nsec = 100*1000*1000};
+
                 while (!reading_thread_stopped) {
                     auto lock = is_server ? &control_block->c_lock : &control_block->s_lock;
                     auto cond = is_server ? &control_block->c_can_r_con : &control_block->s_can_r_con;
                     auto& shared_buf = is_server ?  control_block->c_buf : control_block->s_buf;
+                    auto cond_to_notify = is_server ? &control_block->c_can_w_con : &control_block->s_can_w_con;
 
                     pthread_mutex_lock(lock);
+
                     if (shared_buf.empty()) {
-                        pthread_cond_wait(cond, lock);
+                        pthread_cond_timedwait(cond, lock, &ts);
                     }
 
-                    if (!reading_thread_stopped) {
+                    if (!reading_thread_stopped && !shared_buf.empty()) {
                         process_packet(shared_buf);
+                        pthread_cond_signal(cond_to_notify);
                     }
 
                     pthread_mutex_unlock(lock);
@@ -365,6 +384,7 @@ namespace simple { namespace ipc {
                         auto it = waiting_for_response_requests.find(pack_id);
                         if (it != waiting_for_response_requests.end()) {
                             it->second(std::move(pack));
+                            waiting_for_response_requests.erase(it);
                         }
                     } else {
                         receive_req_callback(this, std::move(pack));
@@ -409,4 +429,4 @@ namespace simple { namespace ipc {
             uint32_t process_id;
         };
 
-    }}
+    }

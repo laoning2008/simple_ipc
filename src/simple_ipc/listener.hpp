@@ -2,13 +2,12 @@
 #include <sys/syscall.h>
 #include <linux/memfd.h>
 #include <sys/mman.h>
-
 #include <sys/socket.h>
 #include <linux/un.h>
-
+#include <sys/epoll.h>
 #include <fcntl.h>
-#include <stdlib.h>
 #include <unistd.h>
+
 #include <string>
 #include <functional>
 #include <thread>
@@ -17,19 +16,14 @@
 #include <pthread.h>
 #include <mutex>
 #include <condition_variable>
-#include <string.h>
-#include <stdio.h>
-#include <stdbool.h>
-#include <time.h>
-#include <errno.h>
-#include <sys/epoll.h>
+
 
 #include "connection_mgr.hpp"
 
-namespace simple { namespace ipc {
+namespace simple::ipc {
 
         class listener_t {
-            constexpr static char *memfd_name = "simple_ipc";
+            constexpr static const char *memfd_name = "simple_ipc";
         public:
             class construct_failed_exception : public std::exception {
             };
@@ -162,4 +156,4 @@ namespace simple { namespace ipc {
             int sock_fd;
         };
 
-}}
+}

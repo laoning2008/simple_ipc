@@ -35,7 +35,7 @@ namespace simple::ipc {
                 stop();
             }
 
-            void start_connect() {
+            void reconnect() {
                 cond.notify_one();
             }
         private:
@@ -69,12 +69,6 @@ namespace simple::ipc {
 
             void worker_proc() {
                 while (!should_stop) {
-                    std::unique_lock lk(mutex);
-                    cond.wait(lk);
-                    if (should_stop) {
-                        break;
-                    }
-
                     int conn_fd = connect_to_server();
                     if (should_stop) {
                         break;
@@ -92,6 +86,9 @@ namespace simple::ipc {
                         break;
                     }
                     fire_callback(mem_fd);
+
+                    std::unique_lock lk(mutex);
+                    cond.wait(lk);
                 }
             }
 
