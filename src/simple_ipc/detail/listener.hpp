@@ -18,7 +18,7 @@
 #include <condition_variable>
 
 
-#include "connection_mgr.hpp"
+#include "simple_ipc/detail/connection_mgr.hpp"
 
 namespace simple::ipc {
 

@@ -6,7 +6,7 @@ namespace simple::ipc {
 
     class ibuffer {
     public:
-        ibuffer(uint32_t len = 0, uint8_t* buf = nullptr) {
+        explicit ibuffer(uint32_t len = 0, uint8_t* buf = nullptr) {
             construct(buf, len);
         }
         
@@ -76,7 +76,7 @@ namespace simple::ipc {
             len_ = len;
         }
     private:
-        uint8_t* buf_;
-        uint32_t len_;
+        uint8_t* buf_{};
+        uint32_t len_{};
     };
 }

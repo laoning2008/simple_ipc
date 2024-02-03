@@ -4,8 +4,8 @@
 #include <atomic>
 #include <memory.h>
 
-#include "crc.hpp"
-#include "ibuffer.hpp"
+#include "simple_ipc/detail/crc.hpp"
+#include "simple_ipc/detail/ibuffer.hpp"
 
 namespace simple::ipc {
 

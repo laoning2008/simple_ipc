@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <linux/un.h>
 #include <fcntl.h>
+#include <sys/epoll.h>
 #include <unistd.h>
 
 #include <string>
@@ -17,9 +18,8 @@
 #include <condition_variable>
 #include <cstring>
 
-#include "utility.hpp"
-#include <sys/epoll.h>
-#include <future>
+#include "simple_ipc/detail/utility.hpp"
+
 
 namespace simple::ipc {
         class connector_t {
@@ -45,14 +45,9 @@ namespace simple::ipc {
                 }
                 should_stop = false;
 
-                std::promise<void> p;
-                auto f = p.get_future();
-                thread = std::thread([this, &p]() {
-                    p.set_value();
+                thread = std::thread([this]() {
                     worker_proc();
                 });
-
-                f.get();
             }
 
             void stop() {

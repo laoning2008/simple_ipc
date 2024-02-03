@@ -15,9 +15,9 @@
 #include <unordered_map>
 #include <list>
 
-#include "ringbuffer.hpp"
-#include "packet.hpp"
-#include "timer.hpp"
+#include "simple_ipc/detail/ringbuffer.hpp"
+#include "simple_ipc/detail/packet.hpp"
+#include "simple_ipc/detail/timer.hpp"
 
 //todo
 //1. need to create and destroy pthread shared objects in both sides?

@@ -4,8 +4,8 @@
 #include <list>
 #include <atomic>
 
-#include "connection.hpp"
-#include "timer.hpp"
+#include "simple_ipc/detail/connection.hpp"
+#include "simple_ipc/detail/timer.hpp"
 
 using namespace std::placeholders;
 

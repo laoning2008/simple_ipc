@@ -1,6 +1,6 @@
 #pragma once
-#include "connection_mgr.hpp"
-#include "listener.hpp"
+#include "simple_ipc/detail/connection_mgr.hpp"
+#include "simple_ipc/detail/listener.hpp"
 using namespace std::placeholders;
 
 namespace simple::ipc {
