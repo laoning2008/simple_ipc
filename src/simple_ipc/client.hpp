@@ -27,6 +27,7 @@ namespace simple { namespace ipc {
                     ,std::bind(&client_t::on_recv_push, this, _1, _2), nullptr, process_id) {
                 timer.start();
                 timer_id = timer.start_timer(std::bind(&client_t::on_heartbeat_timer, this), 3*1000, false);
+                connector.start_connect();
             }
 
             ~client_t() {
@@ -55,7 +56,7 @@ namespace simple { namespace ipc {
             }
         private:
             void on_connected(int fd) {
-                if (!connection.set_fd(fd)) {
+                if (!connection.set_fd(fd) || fd == -1) {
                     connector.start_connect();
                 }
             }

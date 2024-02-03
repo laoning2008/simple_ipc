@@ -34,7 +34,7 @@ namespace simple { namespace ipc {
             class construct_failed_exception : public std::exception {
             };
         public:
-            using callback_t = std::function<void(int fd)>;
+            using callback_t = std::function<bool(int fd)>;
         public:
             listener_t(std::string server_name, callback_t callback)
                     : s_name(std::move(server_name)), cb(std::move(callback)), should_stop(true), sock_fd(-1) {
@@ -65,6 +65,7 @@ namespace simple { namespace ipc {
                     return;
                 }
                 should_stop = true;
+                close(sock_fd);
 
                 if (thread.joinable()) {
                     thread.join();
@@ -72,44 +73,16 @@ namespace simple { namespace ipc {
             }
 
             void worker_proc() {
-                int epoll_fd = epoll_create(1);
-                if (epoll_fd == -1) {
-                    return;
-                }
-
-                struct epoll_event poll_events{};
-                poll_events.data.fd = sock_fd;
-                poll_events.events = EPOLLIN;
-
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sock_fd, &poll_events) == -1) {
-                    close(epoll_fd);
-                    return;
-                }
-
                 while (!should_stop) {
-                    struct epoll_event processable_events{};
-                    int poll_ret = epoll_wait(epoll_fd, &processable_events, 1, 50);
-
-                    //stop signal
-                    if (should_stop) {
-                        break;
-                    }
-
-                    //error
-                    if (poll_ret < 0) {
-                        break;
-                    }
-
-                    //timeout
-                    if (poll_ret == 0) {
-                        continue;
-                    }
-
                     struct sockaddr_un address;
                     socklen_t addr_len = sizeof(address);
                     int conn = accept(sock_fd, (struct sockaddr *) &address, &addr_len);
                     if (conn == -1) {
-                        continue;
+                        break;
+                    }
+
+                    if (should_stop) {
+                        break;
                     }
 
                     auto mem_fd = memfd_create(memfd_name, MFD_CLOEXEC);
@@ -117,12 +90,12 @@ namespace simple { namespace ipc {
                         continue;
                     }
 
-                    send_fd(conn, mem_fd);
-                    cb(mem_fd);
+                    if(cb(mem_fd)) {
+                        send_fd(conn, mem_fd);
+                    }
+
                     close(mem_fd);
                 }
-
-                close(epoll_fd);
             }
 
             void send_fd(int conn, int fd) {
@@ -187,7 +160,6 @@ namespace simple { namespace ipc {
             std::thread thread;
             volatile std::atomic<bool> should_stop;
             int sock_fd;
-            connection_mgr_t conn_mgr;
         };
 
 }}

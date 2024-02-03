@@ -19,6 +19,7 @@
 
 #include "utility.hpp"
 #include <sys/epoll.h>
+#include <future>
 
 namespace simple::ipc {
         class connector_t {
@@ -44,9 +45,14 @@ namespace simple::ipc {
                 }
                 should_stop = false;
 
-                thread = std::thread([this]() {
+                std::promise<void> p;
+                auto f = p.get_future();
+                thread = std::thread([this, &p]() {
+                    p.set_value();
                     worker_proc();
                 });
+
+                f.get();
             }
 
             void stop() {
@@ -221,6 +227,7 @@ namespace simple::ipc {
                     }
 
                     ready = true;
+                    break;
                 }
 
                 close(epoll_fd);

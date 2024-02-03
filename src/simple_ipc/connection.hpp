@@ -120,10 +120,12 @@ namespace simple { namespace ipc {
                     return false;
                 }
 
+                writing_thread_stopped = false;
                 writing_thread = std::thread([this]() {
                     write_proc();
                 });
 
+                reading_thread_stopped = false;
                 reading_thread = std::thread([this]() {
                     read_proc();
                 });
@@ -178,7 +180,7 @@ namespace simple { namespace ipc {
                 control_block = static_cast<control_block_t *>(shared_mem);
 
                 if (is_server) {
-                    if (create_synchronization_objects()) {
+                    if (!create_synchronization_objects()) {
                         return false;
                     }
 

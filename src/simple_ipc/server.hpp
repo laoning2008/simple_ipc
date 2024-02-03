@@ -35,8 +35,8 @@ namespace simple { namespace ipc {
                 conn_mgr.unregister_push_receiver(cmd);
             }
         private:
-            void on_new_connection(int fd) {
-                conn_mgr.new_connection(fd);
+            bool on_new_connection(int fd) {
+                return conn_mgr.new_connection(fd);
             }
         private:
             listener_t listener;
