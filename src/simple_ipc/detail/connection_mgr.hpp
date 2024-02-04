@@ -29,7 +29,7 @@ namespace simple::ipc {
                         , std::bind(&connection_mgr_t::on_recv_req, this, _1, _2)
                         , std::bind(&connection_mgr_t::on_got_process_id, this, _1, _2));
 
-                if (!connection->set_fd(fd)) {
+                if (!connection->start(fd)) {
                     close(fd);
                     return false;
                 }

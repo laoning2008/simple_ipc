@@ -24,59 +24,12 @@ namespace simple::ipc {
             using map_fd_2_timer_t = std::unordered_map<int, timer_t>;
             constexpr static int max_fd_size = 1024;
         public:
-            timer_mgr_t() : epoll_fd(-1), event_fd(-1), to_stop(false) {
+            timer_mgr_t() : epoll_fd(-1), event_fd(-1), stopped(true) {
+                start();
             }
 
             ~timer_mgr_t() {
                 stop();
-            }
-
-            bool start() {
-                if (!to_stop) {
-                    return true;
-                }
-                to_stop = false;
-
-                epoll_fd = epoll_create1(EPOLL_CLOEXEC);
-
-                event_fd = eventfd(0, TFD_CLOEXEC);
-                struct epoll_event event_timer;
-                event_timer.events = EPOLLIN;
-                event_timer.data.fd = event_fd;
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, event_fd, &event_timer) == -1) {
-                    return false;
-                }
-
-                worker = std::thread([this]() {
-                    worker_proc();
-                });
-
-                return true;
-            }
-
-            void stop() {
-                if (to_stop) {
-                    return;
-                }
-                to_stop = true;
-
-                uint64_t v = 1;
-                write(event_fd, &v, sizeof(v));
-
-                if (worker.joinable()) {
-                    worker.join();
-                }
-
-                for (auto& timer : timers) {
-                    close(timer.first);
-                }
-                timers.clear();
-
-                close(event_fd);
-                event_fd = -1;
-
-                close(epoll_fd);
-                epoll_fd = -1;
             }
 
             int start_timer(callback_t cb, uint64_t mills, bool once) {
@@ -86,15 +39,7 @@ namespace simple::ipc {
                     return -1;
                 }
 
-                timespec ts{};
-                if (mills) {
-                    ts.tv_sec  =  mills / 1000;
-                    ts.tv_nsec = (mills % 1000) * 1000000;
-                } else {
-                    ts.tv_sec  = 0;
-                    ts.tv_nsec = 0;
-                }
-
+                timespec ts{.tv_sec = (__time_t)mills / 1000, .tv_nsec = (__time_t)(mills % 1000) * 1000000};
                 itimerspec it{};
                 it.it_value = ts;
                 if (!once) {
@@ -136,10 +81,58 @@ namespace simple::ipc {
             }
 
         private:
+            bool start() {
+                if (!stopped) {
+                    return true;
+                }
+                stopped = false;
+
+                epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+
+                event_fd = eventfd(0, TFD_CLOEXEC);
+                struct epoll_event event_timer{};
+                event_timer.events = EPOLLIN;
+                event_timer.data.fd = event_fd;
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, event_fd, &event_timer) == -1) {
+                    return false;
+                }
+
+                worker = std::thread([this]() {
+                    worker_proc();
+                });
+
+                return true;
+            }
+
+            void stop() {
+                if (stopped) {
+                    return;
+                }
+                stopped = true;
+
+                uint64_t v = 1;
+                write(event_fd, &v, sizeof(v));
+
+                if (worker.joinable()) {
+                    worker.join();
+                }
+
+                for (auto& timer : timers) {
+                    close(timer.first);
+                }
+                timers.clear();
+
+                close(event_fd);
+                event_fd = -1;
+
+                close(epoll_fd);
+                epoll_fd = -1;
+            }
+
             void worker_proc() {
                 struct epoll_event events[max_fd_size];
 
-                while (!to_stop) {
+                while (!stopped) {
                     int nfd = epoll_wait(epoll_fd, events, max_fd_size, -1);
                     if (nfd < 0) {
                         break;
@@ -149,36 +142,26 @@ namespace simple::ipc {
                         continue;
                     }
 
-                    bool exit = false;
                     for (int i = 0; i < nfd; ++i) {
                         if (events[i].data.fd == event_fd) {
-                            exit = true;
                             break;
                         } else {
                             uint64_t one = 0;
-                            if (read(events[i].data.fd, &one, sizeof(one) <= 0)) {
+                            size_t len = sizeof(one);
+                            if (read(events[i].data.fd, &one, len) <= 0) {
                                 stop_timer(events[i].data.fd);
                                 continue;
                             }
 
-                            bool one_shot = false;
-                            {
-                                std::unique_lock<std::mutex> lk(timers_mutex);
-                                auto it = timers.find(events[i].data.fd);
-                                if (it != timers.end()) {
-                                    one_shot = it->second.one_shot;
-                                    it->second.callback();
+                            std::unique_lock<std::mutex> lk(timers_mutex);
+                            auto it = timers.find(events[i].data.fd);
+                            if (it != timers.end()) {
+                                it->second.callback();
+                                if (it->second.one_shot) {
+                                    stop_timer(events[i].data.fd);
                                 }
                             }
-
-                            if (one_shot) {
-                                stop_timer(events[i].data.fd);
-                            }
                         }
-                    }
-
-                    if (exit) {
-                        break;
                     }
                 }
             }
@@ -189,7 +172,7 @@ namespace simple::ipc {
             map_fd_2_timer_t timers;
             std::mutex timers_mutex;
 
-            volatile std::atomic<bool> to_stop;
+            volatile std::atomic<bool> stopped;
             std::thread worker;
         };
     }

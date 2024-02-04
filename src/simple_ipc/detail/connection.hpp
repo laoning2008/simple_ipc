@@ -83,40 +83,9 @@ namespace simple::ipc {
                 stop();
             }
 
-            bool set_fd(int mem_fd) {
-                stop();
-                return start(mem_fd);
-            }
-
-            void send_packet(std::unique_ptr<packet> pack) {
-                send_packet(std::move(pack), nullptr);
-            }
-
-            void send_packet(std::unique_ptr<packet> pack, recv_callback_t cb) {
-                std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
-                waiting_for_sending_packets.emplace_back(std::move(pack), cb);
-                waiting_for_sending_packets_cond.notify_one();
-            }
-
-            void cancel_sending(uint32_t cmd, uint32_t seq) {
-                auto id = packet_id(cmd, seq);
-
-                {
-                    std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
-                    std::remove_if(waiting_for_sending_packets.begin(), waiting_for_sending_packets.end(), [id](const auto& item) {
-                        return packet_id(item.first) == id;
-                    });
-                }
-
-                {
-                    std::unique_lock<std::mutex> lk(waiting_for_response_requests_mutex);
-                    waiting_for_response_requests.erase(id);
-                }
-            }
-        private:
             bool start(int mem_fd) {
                 if (mem_fd == -1) {
-                    return true;
+                    return false;
                 }
 
                 auto shared_mem = map_shared_memory(mem_fd);
@@ -161,6 +130,32 @@ namespace simple::ipc {
                 }
             }
 
+            void send_packet(std::unique_ptr<packet> pack) {
+                send_packet(std::move(pack), nullptr);
+            }
+
+            void send_packet(std::unique_ptr<packet> pack, recv_callback_t cb) {
+                std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
+                waiting_for_sending_packets.emplace_back(std::move(pack), cb);
+                waiting_for_sending_packets_cond.notify_one();
+            }
+
+            void cancel_sending(uint32_t cmd, uint32_t seq) {
+                auto id = packet_id(cmd, seq);
+
+                {
+                    std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
+                    std::remove_if(waiting_for_sending_packets.begin(), waiting_for_sending_packets.end(), [id](const auto& item) {
+                        return packet_id(item.first) == id;
+                    });
+                }
+
+                {
+                    std::unique_lock<std::mutex> lk(waiting_for_response_requests_mutex);
+                    waiting_for_response_requests.erase(id);
+                }
+            }
+        private:
             void *map_shared_memory(int mem_fd) {
                 if (is_server) {
                     if (ftruncate(mem_fd, mm_len) == -1) {
