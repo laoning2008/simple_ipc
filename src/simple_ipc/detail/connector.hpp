@@ -27,7 +27,7 @@ namespace simple::ipc {
             using callback_t = std::function<void(int fd)>;
         public:
             connector_t(std::string server_name, callback_t callback)
-                    : s_name(std::move(server_name)), cb(std::move(callback)), should_stop(true) {
+                    : s_name(std::move(server_name)), conn_fd(-1), cb(std::move(callback)), should_stop(true) {
                 start();
             }
 
@@ -56,15 +56,21 @@ namespace simple::ipc {
                 }
                 should_stop = true;
 
+                if (conn_fd != -1) {
+                    close(conn_fd);
+                }
+
                 cond.notify_one();
                 if (thread.joinable()) {
                     thread.join();
                 }
+
+                conn_fd = -1;
             }
 
             void worker_proc() {
                 while (!should_stop) {
-                    int conn_fd = connect_to_server();
+                    conn_fd = connect_to_server();
                     if (should_stop) {
                         break;
                     }
@@ -74,8 +80,9 @@ namespace simple::ipc {
                         continue;
                     }
 
-                    int mem_fd = receive_fd(conn_fd);
+                    int mem_fd = receive_fd();
                     close(conn_fd);
+                    conn_fd = -1;
 
                     if (should_stop) {
                         break;
@@ -98,73 +105,20 @@ namespace simple::ipc {
                     return -1;
                 }
 
-                if (!set_nonblocking(conn)) {
-                    return -1;
-                }
-
                 int status = connect(conn, (struct sockaddr *) &address, sizeof(struct sockaddr_un));
                 if (status == 0) {
                     return conn;
                 }
 
-                if (errno == EINPROGRESS) {
-                    int epoll_fd = epoll_create(1);
-                    if (epoll_fd == -1) {
-                        close(conn);
-                        return -1;
-                    }
-
-                    struct epoll_event poll_events{};
-                    poll_events.data.fd = conn;
-                    poll_events.events = EPOLLOUT | EPOLLIN | EPOLLERR;
-
-                    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, conn, &poll_events) == -1) {
-                        close(conn);
-                        close(epoll_fd);
-                        return -1;
-                    }
-
-                    bool connected = false;
-                    for (int i = 0; i < 100; ++i) {
-                        struct epoll_event processable_events{};
-                        int poll_ret = epoll_wait(epoll_fd, &processable_events, 1, 50);
-                        //error
-                        if (poll_ret < 0) {
-                            break;
-                        }
-
-                        //stop signal
-                        if (should_stop) {
-                            break;
-                        }
-
-                        //timeout
-                        if (poll_ret == 0) {
-                            continue;
-                        }
-
-                        //seem success, let's check it
-                        int ret_val = -1;
-                        socklen_t ret_val_len = sizeof(ret_val);
-                        if (getsockopt(conn, SOL_SOCKET, SO_ERROR, &ret_val, &ret_val_len) == 0 && ret_val == 0) {
-                            connected = true;
-                        }
-                        break;
-                    }
-
-                    close(epoll_fd);
-                    if (connected) {
-                        return conn;
-                    } else {
-                        close(conn);
-                        return -1;
-                    }
-                } else {
-                    return -1;
-                }
+                close(conn);
+                return -1;
             }
 
-            int receive_fd(int fd) {
+            int receive_fd() {
+                if (conn_fd == -1) {
+                    return -1;
+                }
+
                 struct msghdr msgh{};
                 struct iovec iov{};
                 union {
@@ -184,51 +138,7 @@ namespace simple::ipc {
                 msgh.msg_control = control_un.control;
                 msgh.msg_controllen = sizeof(control_un.control);
 
-                int epoll_fd = epoll_create(1);
-                if (epoll_fd == -1) {
-                    return -1;
-                }
-
-                struct epoll_event poll_events{};
-                poll_events.data.fd = fd;
-                poll_events.events = EPOLLIN;
-
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &poll_events) == -1) {
-                    close(epoll_fd);
-                    return -1;
-                }
-
-                bool ready = false;
-                for (int i = 0; i < 100; ++i) {
-                    struct epoll_event processable_events{};
-                    int poll_ret = epoll_wait(epoll_fd, &processable_events, 1, 50);
-
-                    //stop signal
-                    if (should_stop) {
-                        break;
-                    }
-
-                    //error
-                    if (poll_ret < 0) {
-                        break;
-                    }
-
-                    //timeout
-                    if (poll_ret == 0) {
-                        continue;
-                    }
-
-                    ready = true;
-                    break;
-                }
-
-                close(epoll_fd);
-
-                if (!ready) {
-                    return -1;
-                }
-
-                if (recvmsg(fd, &msgh, 0) != 1) {
+                if (recvmsg(conn_fd, &msgh, 0) == -1) {
                     return -1;
                 }
 
@@ -247,6 +157,7 @@ namespace simple::ipc {
 
         private:
             std::string s_name;
+            int conn_fd;
             callback_t cb;
             std::thread thread;
             volatile std::atomic<bool> should_stop;

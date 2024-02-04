@@ -58,8 +58,18 @@ namespace simple::ipc {
         static const size_t mm_len = cal_mem_size();
 
         class connection_t {
-            using map_packid_2_callback_t = std::unordered_map<uint64_t, recv_callback_t >;
-            using packet_list_t = std::list<std::pair<std::unique_ptr<packet>, recv_callback_t>>;
+            struct request {
+                uint32_t timeout_secs;
+                recv_callback_t callback;
+                std::chrono::steady_clock::time_point begin_time;
+
+                bool should_wait_for_response() {
+                    return callback != nullptr && timeout_secs != 0;
+                }
+            };
+
+            using map_packid_2_callback_t = std::unordered_map<uint64_t, request >;
+            using packet_list_t = std::list<std::pair<std::unique_ptr<packet>, request>>;
         public:
             using got_process_id_callback_t = std::function<void(connection_t* conn, uint32_t process_id)>;
             using disconnected_callback_t = std::function<void(connection_t* conn, uint32_t process_id)>;
@@ -90,8 +100,7 @@ namespace simple::ipc {
                     return false;
                 }
 
-                auto shared_mem = map_shared_memory(mem_fd);
-                if (!init_control_block(shared_mem)) {
+                if (!init_control_block(mem_fd)) {
                     return false;
                 }
 
@@ -133,12 +142,12 @@ namespace simple::ipc {
             }
 
             void send_packet(std::unique_ptr<packet> pack) {
-                send_packet(std::move(pack), nullptr);
+                send_packet(std::move(pack), nullptr, 0);
             }
 
-            void send_packet(std::unique_ptr<packet> pack, recv_callback_t cb) {
+            void send_packet(std::unique_ptr<packet> pack, recv_callback_t cb, uint32_t timeout_secs) {
                 std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
-                waiting_for_sending_packets.emplace_back(std::move(pack), cb);
+                waiting_for_sending_packets.emplace_back(std::move(pack), request{timeout_secs, cb, std::chrono::steady_clock::now()});
                 waiting_for_sending_packets_cond.notify_one();
             }
 
@@ -158,22 +167,8 @@ namespace simple::ipc {
                 }
             }
         private:
-            void *map_shared_memory(int mem_fd) {
-                if (is_server) {
-                    if (ftruncate(mem_fd, mm_len) == -1) {
-                        return nullptr;
-                    }
-                }
-
-                void *shared_mem = mmap(nullptr, mm_len, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, 0);
-                if (shared_mem == MAP_FAILED) {
-                    return nullptr;
-                }
-
-                return shared_mem;
-            }
-
-            bool init_control_block(void *shared_mem) {
+            bool init_control_block(int mem_fd) {
+                auto shared_mem = map_shared_memory(mem_fd);
                 if (shared_mem == nullptr) {
                     return false;
                 }
@@ -192,6 +187,21 @@ namespace simple::ipc {
                 }
 
                 return true;
+            }
+
+            void* map_shared_memory(int mem_fd) const {
+                if (is_server) {
+                    if (ftruncate(mem_fd, mm_len) == -1) {
+                        return nullptr;
+                    }
+                }
+
+                void *shared_mem = mmap(nullptr, mm_len, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, 0);
+                if (shared_mem == MAP_FAILED) {
+                    return nullptr;
+                }
+
+                return shared_mem;
             }
 
             bool create_synchronization_objects() {
@@ -276,7 +286,7 @@ namespace simple::ipc {
                     std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
                     if (waiting_for_sending_packets.empty()) {
                         waiting_for_sending_packets_cond.wait(lk, [this]() {
-                            return writing_thread_stopped || !waiting_for_sending_packets.empty();
+                            return !waiting_for_sending_packets.empty();
                         });
                     }
 
@@ -311,8 +321,10 @@ namespace simple::ipc {
                             continue;
                         }
 
-                        auto pack_id = packet_id(pack.first);
-                        waiting_for_response_requests[pack_id] = pack.second;
+                        if (pack.second.should_wait_for_response()) {
+                            auto pack_id = packet_id(pack.first);
+                            waiting_for_response_requests[pack_id] = pack.second;
+                        }
 
                         memcpy(shared_buf.write_head(), pack_buf.data(), pack_buf.size());
                         shared_buf.commit(pack_buf.size());
@@ -380,7 +392,7 @@ namespace simple::ipc {
                         std::unique_lock<std::mutex> lk(waiting_for_response_requests_mutex);
                         auto it = waiting_for_response_requests.find(pack_id);
                         if (it != waiting_for_response_requests.end()) {
-                            it->second(std::move(pack));
+                            it->second.callback(std::move(pack));
                             waiting_for_response_requests.erase(it);
                         }
                     } else {
@@ -394,6 +406,16 @@ namespace simple::ipc {
                 auto elapse = std::chrono::duration_cast<std::chrono::seconds>(now - last_recv_time).count();
                 if (elapse > active_connection_lifetime_seconds) {
                     disconnected_callback(this, process_id);
+                }
+
+                for (auto it = waiting_for_response_requests.begin(); it != waiting_for_response_requests.end(); ) {
+                    if (std::chrono::duration_cast<std::chrono::seconds>(now - it->second.begin_time).count() < it->second.timeout_secs) {
+                        ++it;
+                        break;
+                    }
+
+                    it->second.callback(nullptr);
+                    it = waiting_for_response_requests.erase(it);
                 }
             }
         private:

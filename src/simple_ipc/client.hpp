@@ -37,8 +37,8 @@ namespace simple::ipc {
                 connection.send_packet(std::move(pack));
             }
 
-            void send_packet(std::unique_ptr<packet> pack, recv_callback_t cb) {
-                connection.send_packet(std::move(pack), cb);
+            void send_packet(std::unique_ptr<packet> pack, recv_callback_t cb, uint32_t timeout_secs) {
+                connection.send_packet(std::move(pack), cb, timeout_secs);
             }
 
             void cancel_sending(uint32_t cmd, uint32_t seq) {

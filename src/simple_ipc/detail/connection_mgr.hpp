@@ -48,18 +48,10 @@ namespace simple::ipc {
             }
 
             bool send_packet(std::unique_ptr<packet> pack) {
-                uint32_t process_id = pack->process_id();
-                std::unique_lock<std::mutex> lk(connections_mutex);
-                auto it = connections.find(process_id);
-                if (it == connections.end()) {
-                    return false;
-                }
-
-                it->second->send_packet(std::move(pack));
-                return true;
+                return send_packet(std::move(pack), nullptr, 0);
             }
 
-            bool send_packet(std::unique_ptr<packet> pack, recv_callback_t cb) {
+            bool send_packet(std::unique_ptr<packet> pack, recv_callback_t cb, uint32_t timeout_secs) {
                 uint32_t process_id = pack->process_id();
                 std::unique_lock<std::mutex> lk(connections_mutex);
                 auto it = connections.find(process_id);
@@ -67,7 +59,7 @@ namespace simple::ipc {
                     return false;
                 }
 
-                it->second->send_packet(std::move(pack), cb);
+                it->second->send_packet(std::move(pack), cb, timeout_secs);
                 return true;
             }
 

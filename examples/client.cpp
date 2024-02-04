@@ -22,9 +22,9 @@ int main(int argc, char** argv) {
         auto pack = simple::ipc::build_req_packet(pid, 1, body, sizeof(body));
         client.send_packet(std::move(pack), [](std::unique_ptr<simple::ipc::packet> rsp) {
             std::cout << "recv rsp = " << (char*)rsp->body().data() << std::endl;
-        });
+        }, 1);
 
-        std::this_thread::sleep_for(1ms);
+        std::this_thread::sleep_for(1000ms);
     }
     return 0;
 }

@@ -15,8 +15,8 @@ namespace simple::ipc {
                 return conn_mgr.send_packet(std::move(pack));
             }
 
-            bool send_packet(std::unique_ptr<packet> pack, recv_callback_t cb) {
-                return conn_mgr.send_packet(std::move(pack), cb);
+            bool send_packet(std::unique_ptr<packet> pack, recv_callback_t cb, uint32_t timeout_secs) {
+                return conn_mgr.send_packet(std::move(pack), cb, timeout_secs);
             }
 
             bool cancel_sending(uint32_t process_id, uint32_t cmd, uint32_t seq) {
