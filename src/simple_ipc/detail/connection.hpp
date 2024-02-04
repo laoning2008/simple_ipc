@@ -84,6 +84,8 @@ namespace simple::ipc {
             }
 
             bool start(int mem_fd) {
+                stop();
+
                 if (mem_fd == -1) {
                     return false;
                 }
