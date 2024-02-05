@@ -41,6 +41,7 @@ namespace simple::ipc {
 
         constexpr static const size_t rw_buf_len = 1024 * 1024;
         constexpr static const uint32_t active_connection_lifetime_seconds = 60;
+        constexpr static const uint64_t cond_wait_time_ns = 100*1000*1000;
 
         static size_t cal_mem_size() {
             static const size_t PAGE_SIZE = sysconf(_SC_PAGESIZE);
@@ -94,7 +95,9 @@ namespace simple::ipc {
             }
 
             bool start(int mem_fd) {
-                stop();
+                if (inited) {
+                    return true;
+                }
 
                 if (mem_fd == -1) {
                     return false;
@@ -114,13 +117,18 @@ namespace simple::ipc {
                     read_proc();
                 });
 
-                timer.start_timer(std::bind(&connection_t::on_timer, this), 1000, false);
+                timer_id = timer.start_timer(std::bind(&connection_t::on_timer, this), 1000, false);
 
                 inited = true;
                 return true;
             }
 
             void stop() {
+                if (!inited) {
+                    return;
+                }
+                inited = false;
+
                 timer.stop_timer(timer_id);
                 timer_id = -1;
 
@@ -134,11 +142,7 @@ namespace simple::ipc {
                     reading_thread.join();
                 }
 
-                if (inited) {
-                    destroy_synchronization_objects();
-                    munmap(control_block, mm_len);
-                    inited = false;
-                }
+                uninit_control_block();
             }
 
             void send_packet(std::unique_ptr<packet> pack) {
@@ -175,18 +179,23 @@ namespace simple::ipc {
 
                 control_block = static_cast<control_block_t *>(shared_mem);
 
-                if (is_server) {
-                    if (!create_synchronization_objects()) {
-                        return false;
-                    }
+                control_block->c_buf.reset((uint8_t*) control_block + sizeof(control_block_t), rw_buf_len);
+                control_block->s_buf.reset((uint8_t*) control_block + sizeof(control_block_t) + rw_buf_len, rw_buf_len);
 
-                    control_block->c_buf = linear_ringbuffer_t{(uint8_t *) control_block + sizeof(control_block_t),
-                                                               rw_buf_len};
-                    control_block->s_buf = linear_ringbuffer_t{
-                            (uint8_t *) control_block + sizeof(control_block_t) + rw_buf_len, rw_buf_len};
+
+                if (is_server && !init_synchronization_objects()) {
+                    return false;
                 }
 
                 return true;
+            }
+
+            void uninit_control_block() {
+                if (is_server ) {
+                    uninit_synchronization_objects();
+                }
+
+                unmap_shared_memory();
             }
 
             void* map_shared_memory(int mem_fd) const {
@@ -204,7 +213,11 @@ namespace simple::ipc {
                 return shared_mem;
             }
 
-            bool create_synchronization_objects() {
+            void unmap_shared_memory() {
+                munmap(control_block, mm_len);
+            }
+
+            bool init_synchronization_objects() {
                 pthread_mutexattr_t mutex_attr;
                 if (pthread_mutexattr_init(&mutex_attr) != 0) {
                     return false;
@@ -272,7 +285,7 @@ namespace simple::ipc {
                 return true;
             }
 
-            void destroy_synchronization_objects() {
+            void uninit_synchronization_objects() {
                 pthread_mutex_destroy(&control_block->c_lock);
                 pthread_mutex_destroy(&control_block->s_lock);
                 pthread_cond_destroy(&control_block->c_can_r_con);
@@ -282,6 +295,11 @@ namespace simple::ipc {
             }
 
             void write_proc() {
+                auto lock = is_server ? &control_block->s_lock : &control_block->c_lock;
+                auto cond = is_server ? &control_block->s_can_w_con : &control_block->c_can_w_con;
+                auto& shared_buf = is_server ?  control_block->s_buf : control_block->c_buf;
+                auto cond_to_notify = is_server ? &control_block->s_can_r_con : &control_block->c_can_r_con;
+
                 while (!writing_thread_stopped) {
                     std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
                     if (waiting_for_sending_packets.empty()) {
@@ -294,14 +312,7 @@ namespace simple::ipc {
                         break;
                     }
 
-                    auto lock = is_server ? &control_block->s_lock : &control_block->c_lock;
-                    auto cond = is_server ? &control_block->s_can_w_con : &control_block->c_can_w_con;
-                    auto& shared_buf = is_server ?  control_block->s_buf : control_block->c_buf;
-                    auto cond_to_notify = is_server ? &control_block->s_can_r_con : &control_block->c_can_r_con;
-
                     pthread_mutex_lock(lock);
-
-                    timespec ts{.tv_sec = 0, .tv_nsec = 100*1000*1000};
 
                     while (!waiting_for_sending_packets.empty()) {
                         auto pack = std::move(waiting_for_sending_packets.front());
@@ -310,7 +321,11 @@ namespace simple::ipc {
                         auto pack_buf = encode_packet(pack.first);
 
                         if (shared_buf.free_size() < pack_buf.size()) {
+                            timespec ts{0,0};
+                            timespec_get(&ts, TIME_UTC);
+                            ts.tv_nsec += cond_wait_time_ns;
                             pthread_cond_timedwait(cond, lock, &ts);
+//                            pthread_cond_wait(cond, lock);
                         }
 
                         if (writing_thread_stopped) {
@@ -323,6 +338,7 @@ namespace simple::ipc {
 
                         if (pack.second.should_wait_for_response()) {
                             auto pack_id = packet_id(pack.first);
+                            std::unique_lock<std::mutex> lk(waiting_for_response_requests_mutex);
                             waiting_for_response_requests[pack_id] = pack.second;
                         }
 
@@ -336,18 +352,21 @@ namespace simple::ipc {
             }
 
             void read_proc() {
-                timespec ts{.tv_sec = 0, .tv_nsec = 100*1000*1000};
+                auto lock = is_server ? &control_block->c_lock : &control_block->s_lock;
+                auto cond = is_server ? &control_block->c_can_r_con : &control_block->s_can_r_con;
+                auto& shared_buf = is_server ?  control_block->c_buf : control_block->s_buf;
+                auto cond_to_notify = is_server ? &control_block->c_can_w_con : &control_block->s_can_w_con;
 
                 while (!reading_thread_stopped) {
-                    auto lock = is_server ? &control_block->c_lock : &control_block->s_lock;
-                    auto cond = is_server ? &control_block->c_can_r_con : &control_block->s_can_r_con;
-                    auto& shared_buf = is_server ?  control_block->c_buf : control_block->s_buf;
-                    auto cond_to_notify = is_server ? &control_block->c_can_w_con : &control_block->s_can_w_con;
-
                     pthread_mutex_lock(lock);
 
                     if (shared_buf.empty()) {
+                        timespec ts{0,0};
+                        timespec_get(&ts, TIME_UTC);
+                        ts.tv_nsec += cond_wait_time_ns;
                         pthread_cond_timedwait(cond, lock, &ts);
+
+//                        pthread_cond_wait(cond, lock);
                     }
 
                     if (!reading_thread_stopped && !shared_buf.empty()) {
@@ -408,6 +427,7 @@ namespace simple::ipc {
                     disconnected_callback(this, process_id);
                 }
 
+                std::unique_lock<std::mutex> lk(waiting_for_response_requests_mutex);
                 for (auto it = waiting_for_response_requests.begin(); it != waiting_for_response_requests.end(); ) {
                     if (std::chrono::duration_cast<std::chrono::seconds>(now - it->second.begin_time).count() < it->second.timeout_secs) {
                         ++it;

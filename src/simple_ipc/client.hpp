@@ -59,11 +59,13 @@ namespace simple::ipc {
                 if (fd != -1 && connection.start(fd)) {
                     connetion_state = state_connected;
                 } else {
+                    connection.stop();
                     connetion_state = state_disconnected;
                 }
             }
 
             void on_disconnected(connection_t* conn, uint32_t process_id) {
+                connection.stop();
                 connetion_state = state_disconnected;
             }
 

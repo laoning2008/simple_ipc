@@ -76,7 +76,7 @@ namespace simple::ipc {
                     }
 
                     if (conn_fd == -1) {
-                        fire_callback(-1);
+                        cb(-1);
                         continue;
                     }
 
@@ -85,9 +85,15 @@ namespace simple::ipc {
                     conn_fd = -1;
 
                     if (should_stop) {
+                        if (mem_fd != -1) {
+                            close(mem_fd);
+                        }
                         break;
                     }
-                    fire_callback(mem_fd);
+                    cb(mem_fd);
+                    if (mem_fd != -1) {
+                        close(mem_fd);
+                    }
 
                     std::unique_lock lk(mutex);
                     cond.wait(lk);
@@ -149,12 +155,6 @@ namespace simple::ipc {
 
                 return *((int *) CMSG_DATA(cmsgh));
             }
-
-
-            void fire_callback(int fd) {
-                cb(fd);
-            }
-
         private:
             std::string s_name;
             int conn_fd;

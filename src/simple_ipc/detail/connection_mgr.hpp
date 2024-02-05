@@ -13,7 +13,6 @@ namespace simple::ipc {
 
         class connection_mgr_t {
         public:
-            using callback_t = std::function<void(int fd)>;
             using map_process_2_connection_t = std::unordered_map<uint32_t , std::unique_ptr<connection_t>>;
             using connection_list_t = std::list<std::unique_ptr<connection_t>>;
         public:

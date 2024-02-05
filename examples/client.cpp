@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
             std::cout << "recv rsp = " << (char*)rsp->body().data() << std::endl;
         }, 1);
 
-        std::this_thread::sleep_for(1000ms);
+        std::this_thread::sleep_for(1ms);
     }
     return 0;
 }
