@@ -21,10 +21,14 @@ int main(int argc, char** argv) {
     while(!stoped) {
         auto pack = simple::ipc::build_req_packet(pid, 1, body, sizeof(body));
         client.send_packet(std::move(pack), [](std::unique_ptr<simple::ipc::packet> rsp) {
-            std::cout << "recv rsp = " << (char*)rsp->body().data() << std::endl;
+            if (rsp) {
+                std::cout << "recv rsp = " << (char*)rsp->body().data() << std::endl;
+            } else {
+                std::cout << "failed the recv rsp" << std::endl;
+            }
         }, 1);
 
-        std::this_thread::sleep_for(1ms);
+        std::this_thread::sleep_for(0ms);
     }
     return 0;
 }

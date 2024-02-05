@@ -87,7 +87,11 @@ namespace simple::ipc {
                 std::unique_lock<std::mutex> lk(temp_connections_mutex);
                 for (auto it = temp_connections.begin(); it != temp_connections.end(); ++it) {
                     if ((*it).get() == conn) {
-                        connections[process_id] = std::move(*it);
+                        {
+                            std::unique_lock<std::mutex> lk_conns(connections_mutex);
+                            connections[process_id] = std::move(*it);
+                        }
+
                         temp_connections.erase(it);
                         break;
                     }
