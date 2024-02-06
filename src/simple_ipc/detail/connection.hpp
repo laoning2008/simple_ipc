@@ -219,79 +219,111 @@ namespace simple::ipc {
 
             bool init_synchronization_objects() {
                 pthread_mutexattr_t mutex_attr;
-                if (pthread_mutexattr_init(&mutex_attr) != 0) {
-                    return false;
-                }
-
-                if (pthread_mutexattr_setrobust(&mutex_attr, PTHREAD_MUTEX_ROBUST) != 0) {
-                    return false;
-                }
-
-                if (pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED) != 0) {
-                    return false;
-                }
-
-                if (pthread_mutex_init(&control_block->c_lock, &mutex_attr) != 0) {
-                    return false;
-                }
-
-                if (pthread_mutex_init(&control_block->s_lock, &mutex_attr) != 0) {
-                    pthread_mutex_destroy(&control_block->c_lock);
-                    return false;
-                }
-
                 pthread_condattr_t cond_attr;
-                if (pthread_condattr_init(&cond_attr) != 0) {
-                    pthread_mutex_destroy(&control_block->c_lock);
-                    pthread_mutex_destroy(&control_block->s_lock);
-                    return false;
+
+                bool mutex_attr_inited = false;
+                bool cond_attr_inited = false;
+                bool c_lock_inited = false;
+                bool s_lock_inited = false;
+                bool c_can_r_con_inited = false;
+                bool c_can_w_con_inited = false;
+                bool s_can_r_con_inited = false;
+                bool s_can_w_con_inited = false;
+
+                do {
+                    if (pthread_mutexattr_init(&mutex_attr) != 0) {
+                        break;
+                    }
+                    mutex_attr_inited = true;
+
+                    if (pthread_mutexattr_setrobust(&mutex_attr, PTHREAD_MUTEX_ROBUST) != 0) {
+                        break;
+                    }
+
+                    if (pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED) != 0) {
+                        break;
+                    }
+
+                    if (pthread_mutex_init(&control_block->c_lock, &mutex_attr) != 0) {
+                        break;
+                    }
+                    c_lock_inited = true;
+
+                    if (pthread_mutex_init(&control_block->s_lock, &mutex_attr) != 0) {
+                        break;
+                    }
+                    s_lock_inited = true;
+
+                    if (pthread_condattr_init(&cond_attr) != 0) {
+                        break;
+                    }
+                    cond_attr_inited = true;
+
+                    if (pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED) != 0) {
+                        break;
+                    }
+
+                    if (pthread_cond_init(&control_block->c_can_r_con, &cond_attr) != 0) {
+                        break;
+                    }
+                    c_can_r_con_inited = true;
+
+                    if (pthread_cond_init(&control_block->c_can_w_con, &cond_attr) != 0) {
+                        break;
+                    }
+                    c_can_w_con_inited = true;
+
+                    if (pthread_cond_init(&control_block->s_can_r_con, &cond_attr) != 0) {
+                        break;
+                    }
+                    s_can_r_con_inited = true;
+
+                    if (pthread_cond_init(&control_block->s_can_w_con, &cond_attr) != 0) {
+                        break;
+                    }
+                    s_can_w_con_inited = true;
+                } while (0);
+
+                bool result = mutex_attr_inited&&cond_attr_inited&&c_lock_inited&&s_lock_inited&&c_can_r_con_inited&&c_can_w_con_inited&&s_can_r_con_inited&&s_can_w_con_inited;
+                if (mutex_attr_inited) {
+                    pthread_mutexattr_destroy(&mutex_attr);
                 }
-                if (pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED) != 0) {
-                    pthread_mutex_destroy(&control_block->c_lock);
-                    pthread_mutex_destroy(&control_block->s_lock);
-                    return false;
+                if (cond_attr_inited) {
+                    pthread_condattr_destroy(&cond_attr);
                 }
 
-                if (pthread_cond_init(&control_block->c_can_r_con, &cond_attr) != 0) {
-                    pthread_mutex_destroy(&control_block->c_lock);
-                    pthread_mutex_destroy(&control_block->s_lock);
-                    return false;
+                if (!result) {
+                    if (c_lock_inited) {
+                        pthread_mutex_destroy(&control_block->c_lock);
+                    }
+                    if (s_lock_inited) {
+                        pthread_mutex_destroy(&control_block->s_lock);
+                    }
+                    if (c_can_r_con_inited) {
+                        pthread_cond_destroy(&control_block->c_can_r_con);
+                    }
+                    if (c_can_w_con_inited) {
+                        pthread_cond_destroy(&control_block->c_can_w_con);
+                    }
+                    if (s_can_r_con_inited) {
+                        pthread_cond_destroy(&control_block->s_can_r_con);
+                    }
+                    if (s_can_w_con_inited) {
+                        pthread_cond_destroy(&control_block->s_can_r_con);
+                    }
                 }
 
-                if (pthread_cond_init(&control_block->c_can_w_con, &cond_attr) != 0) {
-                    pthread_mutex_destroy(&control_block->c_lock);
-                    pthread_mutex_destroy(&control_block->s_lock);
-                    pthread_cond_destroy(&control_block->c_can_r_con);
-                    return false;
-                }
-
-                if (pthread_cond_init(&control_block->s_can_r_con, &cond_attr) != 0) {
-                    pthread_mutex_destroy(&control_block->c_lock);
-                    pthread_mutex_destroy(&control_block->s_lock);
-                    pthread_cond_destroy(&control_block->c_can_r_con);
-                    pthread_cond_destroy(&control_block->c_can_w_con);
-                    return false;
-                }
-
-                if (pthread_cond_init(&control_block->s_can_w_con, &cond_attr) != 0) {
-                    pthread_mutex_destroy(&control_block->c_lock);
-                    pthread_mutex_destroy(&control_block->s_lock);
-                    pthread_cond_destroy(&control_block->c_can_r_con);
-                    pthread_cond_destroy(&control_block->c_can_w_con);
-                    pthread_cond_destroy(&control_block->s_can_r_con);
-                    return false;
-                }
-
-                return true;
+                return result;
             }
 
             void uninit_synchronization_objects() {
-                pthread_mutex_destroy(&control_block->c_lock);
-                pthread_mutex_destroy(&control_block->s_lock);
                 pthread_cond_destroy(&control_block->c_can_r_con);
                 pthread_cond_destroy(&control_block->c_can_w_con);
                 pthread_cond_destroy(&control_block->s_can_r_con);
                 pthread_cond_destroy(&control_block->s_can_w_con);
+
+                pthread_mutex_destroy(&control_block->c_lock);
+                pthread_mutex_destroy(&control_block->s_lock);
             }
 
             void write_proc() {
@@ -304,7 +336,7 @@ namespace simple::ipc {
                     std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
                     if (waiting_for_sending_packets.empty()) {
                         waiting_for_sending_packets_cond.wait(lk, [this]() {
-                            return !waiting_for_sending_packets.empty();
+                            return true;
                         });
                     }
 
