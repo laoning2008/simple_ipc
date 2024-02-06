@@ -68,7 +68,7 @@ namespace simple::ipc {
 
             void worker_proc() {
                 while (!should_stop) {
-                    struct sockaddr_un address;
+                    struct sockaddr_un address{};
                     socklen_t addr_len = sizeof(address);
                     int conn = accept(sock_fd, (struct sockaddr *) &address, &addr_len);
                     if (conn == -1) {
@@ -92,20 +92,20 @@ namespace simple::ipc {
                 }
             }
 
-            void send_fd(int conn, int fd) {
-                struct msghdr msgh;
-                struct iovec iov;
+            static void send_fd(int conn, int fd) {
+                struct msghdr msgh{};
+                struct iovec iov{};
                 union {
                     struct cmsghdr cmsgh;
                     /* Space large enough to hold an 'int' */
                     char control[CMSG_SPACE(sizeof(int))];
-                } control_un;
+                } control_un{};
 
                 char placeholder = 'A';
                 iov.iov_base = &placeholder;
                 iov.iov_len = sizeof(char);
 
-                msgh.msg_name = NULL;
+                msgh.msg_name = nullptr;
                 msgh.msg_namelen = 0;
                 msgh.msg_iov = &iov;
                 msgh.msg_iovlen = 1;
@@ -127,7 +127,7 @@ namespace simple::ipc {
                     return false;
                 }
 
-                struct sockaddr_un address;
+                struct sockaddr_un address{};
                 socklen_t addr_len = 0;
                 memset(&address, 0, sizeof(address));
                 address.sun_family = AF_UNIX;

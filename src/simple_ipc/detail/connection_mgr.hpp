@@ -10,23 +10,17 @@
 using namespace std::placeholders;
 
 namespace simple::ipc {
-
         class connection_mgr_t {
         public:
             using map_process_2_connection_t = std::unordered_map<uint32_t , std::unique_ptr<connection_t>>;
             using connection_list_t = std::list<std::unique_ptr<connection_t>>;
+            using map_cmd_2_callback_t = std::unordered_map<uint32_t, recv_callback_t >;
         public:
-            connection_mgr_t() {
-            }
-
-            ~connection_mgr_t() {
-            }
-
             bool new_connection(int fd) {
                 auto connection = std::make_unique<connection_t>(true, timer
-                        , std::bind(&connection_mgr_t::on_disconnected, this, _1, _2)
-                        , std::bind(&connection_mgr_t::on_recv_req, this, _1, _2)
-                        , std::bind(&connection_mgr_t::on_got_process_id, this, _1, _2));
+                        , [this](connection_t* conn, uint32_t process_id){ on_disconnected(conn, process_id);}
+                        , [this](connection_t* conn, std::unique_ptr<packet> pack){on_receive_req(conn, std::move(pack));}
+                        , [this](connection_t* conn, uint32_t process_id){ on_got_process_id(conn, process_id);});
 
                 if (!connection->start(fd)) {
                     close(fd);
@@ -106,13 +100,13 @@ namespace simple::ipc {
 
                 {
                     std::unique_lock<std::mutex> lk(temp_connections_mutex);
-                    std::remove_if(temp_connections.begin(), temp_connections.end(), [conn](const std::unique_ptr<connection_t>& it) {
+                    temp_connections.erase(std::remove_if(temp_connections.begin(), temp_connections.end(), [conn](const std::unique_ptr<connection_t>& it) {
                         return it.get() == conn;
-                    });
+                    }), temp_connections.end());
                 }
             }
 
-            void on_recv_req(connection_t* conn, std::unique_ptr<packet> pack) {
+            void on_receive_req(connection_t* conn, std::unique_ptr<packet> pack) {
                 std::unique_lock<std::mutex> lk(req_processors_mutex);
                 auto it = req_processors.find(pack->cmd());
                 if (it != req_processors.end()) {

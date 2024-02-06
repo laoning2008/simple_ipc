@@ -14,26 +14,23 @@
 #include <thread>
 #include <unordered_map>
 #include <list>
+#include <utility>
 
 #include "simple_ipc/detail/ringbuffer.hpp"
 #include "simple_ipc/detail/packet.hpp"
 #include "simple_ipc/detail/timer.hpp"
 
-//todo
-//1. need to create and destroy pthread shared objects in both sides?
-//2.
 namespace simple::ipc {
     using recv_callback_t = std::function<void(std::unique_ptr<packet> pack)>;
-    using map_cmd_2_callback_t = std::unordered_map<uint32_t, recv_callback_t >;
 
         struct control_block_t {
-            pthread_mutex_t c_lock;
-            pthread_mutex_t s_lock;
+            pthread_mutex_t c_lock{};
+            pthread_mutex_t s_lock{};
 
-            pthread_cond_t c_can_r_con;
-            pthread_cond_t c_can_w_con;
-            pthread_cond_t s_can_r_con;
-            pthread_cond_t s_can_w_con;
+            pthread_cond_t c_can_r_con{};
+            pthread_cond_t c_can_w_con{};
+            pthread_cond_t s_can_r_con{};
+            pthread_cond_t s_can_w_con{};
 
             linear_ringbuffer_t c_buf;
             linear_ringbuffer_t s_buf;
@@ -60,11 +57,11 @@ namespace simple::ipc {
 
         class connection_t {
             struct request {
-                uint32_t timeout_secs;
+                uint32_t timeout_secs{};
                 recv_callback_t callback;
                 std::chrono::steady_clock::time_point begin_time;
 
-                bool should_wait_for_response() {
+                [[nodiscard]] bool should_wait_for_response() const {
                     return callback != nullptr && timeout_secs != 0;
                 }
             };
@@ -84,9 +81,9 @@ namespace simple::ipc {
             : is_server(server), inited(false), timer(t), timer_id(-1), control_block(nullptr)
             , writing_thread_stopped(false), reading_thread_stopped(false)
             , last_recv_time(std::chrono::steady_clock::now())
-            , disconnected_callback(disconnected_cb)
-            , receive_req_callback(receive_req_cb)
-            , got_process_id_callback(got_process_id_cb)
+            , disconnected_callback(std::move(disconnected_cb))
+            , receive_req_callback(std::move(receive_req_cb))
+            , got_process_id_callback(std::move(got_process_id_cb))
             , process_id(proc_id) {
             }
 
@@ -117,7 +114,7 @@ namespace simple::ipc {
                     read_proc();
                 });
 
-                timer_id = timer.start_timer(std::bind(&connection_t::on_timer, this), 1000, false);
+                timer_id = timer.start_timer([this](){on_timer();}, 1000, false);
 
                 inited = true;
                 return true;
@@ -160,9 +157,9 @@ namespace simple::ipc {
 
                 {
                     std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
-                    std::remove_if(waiting_for_sending_packets.begin(), waiting_for_sending_packets.end(), [id](const auto& item) {
+                    waiting_for_sending_packets.erase(std::remove_if(waiting_for_sending_packets.begin(), waiting_for_sending_packets.end(), [id](const auto& item) {
                         return packet_id(item.first) == id;
-                    });
+                    }), waiting_for_sending_packets.end());
                 }
 
                 {
@@ -282,7 +279,7 @@ namespace simple::ipc {
                         break;
                     }
                     s_can_w_con_inited = true;
-                } while (0);
+                } while (false);
 
                 bool result = mutex_attr_inited&&cond_attr_inited&&c_lock_inited&&s_lock_inited&&c_can_r_con_inited&&c_can_w_con_inited&&s_can_r_con_inited&&s_can_w_con_inited;
                 if (mutex_attr_inited) {
@@ -357,7 +354,6 @@ namespace simple::ipc {
                             timespec_get(&ts, TIME_UTC);
                             ts.tv_nsec += cond_wait_time_ns;
                             pthread_cond_timedwait(cond, lock, &ts);
-//                            pthread_cond_wait(cond, lock);
                         }
 
                         if (writing_thread_stopped) {
@@ -370,7 +366,7 @@ namespace simple::ipc {
 
                         if (pack.second.should_wait_for_response()) {
                             auto pack_id = packet_id(pack.first);
-                            std::unique_lock<std::mutex> lk(waiting_for_response_requests_mutex);
+                            std::unique_lock<std::mutex> lk_req(waiting_for_response_requests_mutex);
                             waiting_for_response_requests[pack_id] = pack.second;
                         }
 
@@ -397,8 +393,6 @@ namespace simple::ipc {
                         timespec_get(&ts, TIME_UTC);
                         ts.tv_nsec += cond_wait_time_ns;
                         pthread_cond_timedwait(cond, lock, &ts);
-
-//                        pthread_cond_wait(cond, lock);
                     }
 
                     if (!reading_thread_stopped && !shared_buf.empty()) {

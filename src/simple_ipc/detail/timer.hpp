@@ -50,7 +50,7 @@ namespace simple::ipc {
                     return -1;
                 }
 
-                struct epoll_event event_event;
+                struct epoll_event event_event{};
                 event_event.events = EPOLLIN|EPOLLRDHUP;
                 event_event.data.fd = timer_fd;
                 if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_fd, &event_event) == -1) {

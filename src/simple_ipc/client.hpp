@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <functional>
 #include <memory>
+#include <utility>
 
 #include "simple_ipc/detail/connector.hpp"
 #include "simple_ipc/detail/connection.hpp"
@@ -23,14 +24,15 @@ namespace simple::ipc {
             using recv_callback_t = std::function<void(std::unique_ptr<packet> pack)>;
             using map_cmd_2_callback_t = std::unordered_map<uint32_t, recv_callback_t >;
         public:
-            client_t(std::string server_name)
+            explicit client_t(std::string server_name)
             : process_id(getpid())
-            , connetion_state(state_connecting)
-            , connector(std::move(server_name), std::bind(&client_t::on_connected, this, _1))
-            , connection(false, timer, std::bind(&client_t::on_disconnected, this, _1, _2)
-                    ,std::bind(&client_t::on_recv_req, this, _1, _2), nullptr, process_id) {
-                timer.start_timer(std::bind(&client_t::on_heartbeat_timer, this), 3*1000, false);
-                timer.start_timer(std::bind(&client_t::on_reconnect_timer, this), 1000, false);
+            , connection_state(state_connecting)
+            , connector(std::move(server_name), [this](int fd){ on_connected(fd);})
+            , connection(false, timer, [this](connection_t* conn, uint32_t id){ on_disconnected(conn, id);}
+                            , [this](connection_t* conn, std::unique_ptr<packet> pack){on_receive_req(conn, std::move(pack));}
+                            , nullptr, process_id) {
+                timer.start_timer([this](){on_heartbeat_timer();}, 3*1000, false);
+                timer.start_timer([this](){on_reconnect_timer();}, 1000, false);
             }
 
             void send_packet(std::unique_ptr<packet> pack) {
@@ -38,7 +40,7 @@ namespace simple::ipc {
             }
 
             void send_packet(std::unique_ptr<packet> pack, recv_callback_t cb, uint32_t timeout_secs) {
-                connection.send_packet(std::move(pack), cb, timeout_secs);
+                connection.send_packet(std::move(pack), std::move(cb), timeout_secs);
             }
 
             void cancel_sending(uint32_t cmd, uint32_t seq) {
@@ -47,7 +49,7 @@ namespace simple::ipc {
 
             void register_request_processor(uint32_t cmd, recv_callback_t cb) {
                 std::unique_lock<std::mutex> lk(req_processors_mutex);
-                req_processors[cmd] = cb;
+                req_processors[cmd] = std::move(cb);
             }
 
             void unregister_request_processor(uint32_t cmd) {
@@ -59,17 +61,17 @@ namespace simple::ipc {
                 connection.stop();
 
                 if (fd != -1 && connection.start(fd)) {
-                    connetion_state = state_connected;
+                    connection_state = state_connected;
                 } else {
-                    connetion_state = state_disconnected;
+                    connection_state = state_disconnected;
                 }
             }
 
-            void on_disconnected(connection_t* conn, uint32_t process_id) {
-                connetion_state = state_disconnected;
+            void on_disconnected(connection_t* conn, uint32_t id) {
+                connection_state = state_disconnected;
             }
 
-            void on_recv_req(connection_t* conn,  std::unique_ptr<packet> pack) {
+            void on_receive_req(connection_t* conn,  std::unique_ptr<packet> pack) {
                 std::unique_lock<std::mutex> lk(req_processors_mutex);
                 auto it = req_processors.find(pack->cmd());
                 if (it != req_processors.end()) {
@@ -83,17 +85,17 @@ namespace simple::ipc {
             }
 
             void on_reconnect_timer() {
-                if (connetion_state != state_disconnected) {
+                if (connection_state != state_disconnected) {
                     return;
                 }
 
-                connetion_state = state_connecting;
+                connection_state = state_connecting;
                 connector.reconnect();
             }
         private:
             uint32_t process_id;
 
-            std::atomic<int> connetion_state;
+            std::atomic<int> connection_state;
 
             timer_mgr_t timer;
 

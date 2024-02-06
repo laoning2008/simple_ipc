@@ -120,7 +120,7 @@ namespace simple::ipc {
                 return -1;
             }
 
-            int receive_fd() {
+            [[nodiscard]] int receive_fd() const {
                 if (conn_fd == -1) {
                     return -1;
                 }
