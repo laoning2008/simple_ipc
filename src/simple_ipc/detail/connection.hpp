@@ -60,7 +60,7 @@ namespace simple::ipc {
         static const size_t mm_len = cal_mem_size();
 
         class connection_t {
-            struct request {
+            struct request_t {
                 uint32_t timeout_secs{};
                 recv_callback_t callback;
                 std::chrono::steady_clock::time_point begin_time;
@@ -70,8 +70,8 @@ namespace simple::ipc {
                 }
             };
 
-            using map_packid_2_callback_t = std::unordered_map<uint64_t, request >;
-            using packet_list_t = std::list<std::pair<std::unique_ptr<packet>, request>>;
+            using map_packid_2_callback_t = std::unordered_map<uint64_t, request_t >;
+            using packet_list_t = std::list<std::pair<std::unique_ptr<packet>, request_t>>;
         public:
             using got_process_id_callback_t = std::function<void(connection_t* conn, uint32_t process_id)>;
             using disconnected_callback_t = std::function<void(connection_t* conn, uint32_t process_id)>;
@@ -181,7 +181,7 @@ namespace simple::ipc {
 
             void send_packet(std::unique_ptr<packet> pack, recv_callback_t cb, uint32_t timeout_secs) {
                 std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
-                waiting_for_sending_packets.emplace_back(std::move(pack), request{timeout_secs, cb, std::chrono::steady_clock::now()});
+                waiting_for_sending_packets.emplace_back(std::move(pack), request_t{timeout_secs, cb, std::chrono::steady_clock::now()});
                 waiting_for_sending_packets_cond.notify_one();
             }
 
@@ -377,19 +377,22 @@ namespace simple::ipc {
                 pthread_cond_broadcast(&control_block->s_can_r_con);
                 pthread_cond_broadcast(&control_block->s_can_w_con);
 
-                pthread_mutex_lock(&control_block->c_inited_lock);
-                while (control_block->c_inited) {
-                    pthread_cond_wait(&control_block->c_inited_state_con, &control_block->c_inited_lock);
-                }
-                pthread_mutex_unlock(&control_block->c_inited_lock);
-
-                pthread_cond_destroy(&control_block->c_can_r_con);
-                pthread_cond_destroy(&control_block->c_can_w_con);
-                pthread_cond_destroy(&control_block->s_can_r_con);
-                pthread_cond_destroy(&control_block->s_can_w_con);
-
-                pthread_mutex_destroy(&control_block->c_lock);
-                pthread_mutex_destroy(&control_block->s_lock);
+//                pthread_mutex_lock(&control_block->c_inited_lock);
+//                while (control_block->c_inited) {
+//                    pthread_cond_wait(&control_block->c_inited_state_con, &control_block->c_inited_lock);
+//                }
+//                pthread_mutex_unlock(&control_block->c_inited_lock);
+//
+//                pthread_cond_destroy(&control_block->c_can_r_con);
+//                pthread_cond_destroy(&control_block->c_can_w_con);
+//                pthread_cond_destroy(&control_block->s_can_r_con);
+//                pthread_cond_destroy(&control_block->s_can_w_con);
+//
+//                pthread_mutex_destroy(&control_block->c_lock);
+//                pthread_mutex_destroy(&control_block->s_lock);
+//
+//                pthread_cond_destroy(&control_block->c_inited_state_con);
+//                pthread_mutex_destroy(&control_block->c_inited_lock);
             }
 
             void write_proc() {
@@ -402,14 +405,12 @@ namespace simple::ipc {
 
                 while (!writing_thread_stopped) {
                     ibuffer pack_buf;
-                    request req;
+                    request_t req;
                     uint64_t pack_id = 0;
                     {
                         std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
                         while (!writing_thread_stopped && waiting_for_sending_packets.empty()) {
-                            waiting_for_sending_packets_cond.wait(lk, [this]() {
-                                return !waiting_for_sending_packets.empty();
-                            });
+                            waiting_for_sending_packets_cond.wait(lk);
                         }
 
                         if (writing_thread_stopped) {

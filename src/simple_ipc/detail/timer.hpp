@@ -153,11 +153,19 @@ namespace simple::ipc {
                                 continue;
                             }
 
-                            std::unique_lock<std::mutex> lk(timers_mutex);
-                            auto it = timers.find(events[i].data.fd);
-                            if (it != timers.end()) {
-                                it->second.callback();
-                                if (it->second.one_shot) {
+                            timer_t timer;
+
+                            {
+                                std::unique_lock<std::mutex> lk(timers_mutex);
+                                auto it = timers.find(events[i].data.fd);
+                                if (it != timers.end()) {
+                                    timer = it->second;
+                                }
+                            }
+
+                            if (timer.callback) {
+                                timer.callback();
+                                if (timer.one_shot) {
                                     stop_timer(events[i].data.fd);
                                 }
                             }
