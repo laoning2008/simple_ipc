@@ -20,6 +20,8 @@ namespace simple::ipc {
             constexpr static const int state_connecting = 3;
 
             constexpr static const uint32_t heartbeat_cmd = 0;
+            constexpr static const uint64_t heartbeat_interval_ms = 2 * 1000;
+            constexpr static const uint64_t reconnect_check_interval_ms = 1 * 1000;
         public:
             using recv_callback_t = std::function<void(std::unique_ptr<packet> pack)>;
             using map_cmd_2_callback_t = std::unordered_map<uint32_t, recv_callback_t >;
@@ -31,8 +33,8 @@ namespace simple::ipc {
             , connection(false, timer, [this](connection_t* conn, uint32_t id){ on_disconnected(conn, id);}
                             , [this](connection_t* conn, std::unique_ptr<packet> pack){on_receive_req(conn, std::move(pack));}
                             , nullptr, process_id) {
-                timer.start_timer([this](){on_heartbeat_timer();}, 3*1000, false);
-                timer.start_timer([this](){on_reconnect_timer();}, 1000, false);
+                timer.start_timer([this](){on_heartbeat_timer();}, heartbeat_interval_ms, false);
+                timer.start_timer([this](){on_reconnect_timer();}, reconnect_check_interval_ms, false);
             }
 
             void send_packet(std::unique_ptr<packet> pack) {

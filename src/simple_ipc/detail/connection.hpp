@@ -24,6 +24,10 @@ namespace simple::ipc {
     using recv_callback_t = std::function<void(std::unique_ptr<packet> pack)>;
 
         struct control_block_t {
+            bool c_inited = false;
+            pthread_cond_t c_inited_state_con{};
+            pthread_mutex_t c_inited_lock{};
+
             pthread_mutex_t c_lock{};
             pthread_mutex_t s_lock{};
 
@@ -37,8 +41,8 @@ namespace simple::ipc {
         };
 
         constexpr static const size_t rw_buf_len = 1024 * 1024;
-        constexpr static const uint32_t active_connection_lifetime_seconds = 60;
-        constexpr static const uint64_t cond_wait_time_ns = 100*1000*1000;
+        constexpr static const uint32_t active_connection_lifetime_seconds = 6;
+        constexpr static const uint64_t timer_interval_ms = 1 * 1000;
 
         static size_t cal_mem_size() {
             static const size_t PAGE_SIZE = sysconf(_SC_PAGESIZE);
@@ -100,8 +104,21 @@ namespace simple::ipc {
                     return false;
                 }
 
-                if (!init_control_block(mem_fd)) {
+                void* shared_mem = map_shared_memory(mem_fd);
+                if (!shared_mem) {
                     return false;
+                }
+                control_block = static_cast<control_block_t *>(shared_mem);
+
+                if (is_server) {
+                    if (!init_control_block()) {
+                        return false;
+                    }
+                } else {
+                    pthread_mutex_lock(&control_block->c_inited_lock);
+                    control_block->c_inited = true;
+                    pthread_cond_signal(&control_block->c_inited_state_con);
+                    pthread_mutex_unlock(&control_block->c_inited_lock);
                 }
 
                 writing_thread_stopped = false;
@@ -114,7 +131,7 @@ namespace simple::ipc {
                     read_proc();
                 });
 
-                timer_id = timer.start_timer([this](){on_timer();}, 1000, false);
+                timer_id = timer.start_timer([this](){on_timer();}, timer_interval_ms, false);
 
                 inited = true;
                 return true;
@@ -132,6 +149,13 @@ namespace simple::ipc {
                 writing_thread_stopped = true;
                 reading_thread_stopped = true;
                 waiting_for_sending_packets_cond.notify_one();
+
+                auto cond_r_notify = is_server ? &control_block->c_can_r_con : &control_block->s_can_r_con;
+                auto cond_w_notify = is_server ? &control_block->s_can_w_con : &control_block->c_can_w_con;
+
+                pthread_cond_signal(cond_r_notify);
+                pthread_cond_signal(cond_w_notify);
+
                 if (writing_thread.joinable()) {
                     writing_thread.join();
                 }
@@ -139,7 +163,16 @@ namespace simple::ipc {
                     reading_thread.join();
                 }
 
-                uninit_control_block();
+                if (is_server) {
+                    uninit_control_block();
+                } else {
+                    pthread_mutex_lock(&control_block->c_inited_lock);
+                    control_block->c_inited = false;
+                    pthread_cond_signal(&control_block->c_inited_state_con);
+                    pthread_mutex_unlock(&control_block->c_inited_lock);
+                }
+
+                unmap_shared_memory();
             }
 
             void send_packet(std::unique_ptr<packet> pack) {
@@ -168,33 +201,6 @@ namespace simple::ipc {
                 }
             }
         private:
-            bool init_control_block(int mem_fd) {
-                auto shared_mem = map_shared_memory(mem_fd);
-                if (shared_mem == nullptr) {
-                    return false;
-                }
-
-                control_block = static_cast<control_block_t *>(shared_mem);
-
-                control_block->c_buf.reset((uint8_t*) control_block + sizeof(control_block_t), rw_buf_len);
-                control_block->s_buf.reset((uint8_t*) control_block + sizeof(control_block_t) + rw_buf_len, rw_buf_len);
-
-
-                if (is_server && !init_synchronization_objects()) {
-                    return false;
-                }
-
-                return true;
-            }
-
-            void uninit_control_block() {
-                if (is_server ) {
-                    uninit_synchronization_objects();
-                }
-
-                unmap_shared_memory();
-            }
-
             void* map_shared_memory(int mem_fd) const {
                 if (is_server) {
                     if (ftruncate(mem_fd, mm_len) == -1) {
@@ -214,12 +220,37 @@ namespace simple::ipc {
                 munmap(control_block, mm_len);
             }
 
+            bool init_control_block() {
+                if (!init_synchronization_objects()) {
+                    return false;
+                }
+
+                control_block->c_inited = false;
+
+                control_block->c_buf = linear_ringbuffer_t{rw_buf_len};
+                control_block->s_buf = linear_ringbuffer_t{rw_buf_len};
+
+                return true;
+            }
+
+            void uninit_control_block() {
+                uninit_synchronization_objects();
+                control_block->c_buf.clear();
+                control_block->s_buf.clear();
+
+                control_block->c_inited = false;
+
+                uninit_synchronization_objects();
+            }
+
             bool init_synchronization_objects() {
                 pthread_mutexattr_t mutex_attr;
                 pthread_condattr_t cond_attr;
 
                 bool mutex_attr_inited = false;
                 bool cond_attr_inited = false;
+                bool c_inited_state_lock_inited = false;
+                bool c_inited_state_cond_inited = false;
                 bool c_lock_inited = false;
                 bool s_lock_inited = false;
                 bool c_can_r_con_inited = false;
@@ -233,6 +264,15 @@ namespace simple::ipc {
                     }
                     mutex_attr_inited = true;
 
+                    if (pthread_condattr_init(&cond_attr) != 0) {
+                        break;
+                    }
+                    cond_attr_inited = true;
+
+                    if (pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED) != 0) {
+                        break;
+                    }
+
                     if (pthread_mutexattr_setrobust(&mutex_attr, PTHREAD_MUTEX_ROBUST) != 0) {
                         break;
                     }
@@ -240,6 +280,17 @@ namespace simple::ipc {
                     if (pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED) != 0) {
                         break;
                     }
+
+                    if (pthread_mutex_init(&control_block->c_inited_lock, &mutex_attr) != 0) {
+                        break;
+                    }
+                    c_inited_state_lock_inited = true;
+
+                    if (pthread_cond_init(&control_block->c_inited_state_con, &cond_attr) != 0) {
+                        break;
+                    }
+                    c_inited_state_cond_inited = true;
+
 
                     if (pthread_mutex_init(&control_block->c_lock, &mutex_attr) != 0) {
                         break;
@@ -250,15 +301,6 @@ namespace simple::ipc {
                         break;
                     }
                     s_lock_inited = true;
-
-                    if (pthread_condattr_init(&cond_attr) != 0) {
-                        break;
-                    }
-                    cond_attr_inited = true;
-
-                    if (pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED) != 0) {
-                        break;
-                    }
 
                     if (pthread_cond_init(&control_block->c_can_r_con, &cond_attr) != 0) {
                         break;
@@ -308,12 +350,39 @@ namespace simple::ipc {
                     if (s_can_w_con_inited) {
                         pthread_cond_destroy(&control_block->s_can_r_con);
                     }
+
+                    if (c_inited_state_lock_inited) {
+                        pthread_mutex_destroy(&control_block->c_inited_lock);
+                    }
+
+                    if (c_inited_state_cond_inited) {
+                        pthread_cond_destroy(&control_block->c_inited_state_con);
+                    }
+
+                    if (mutex_attr_inited) {
+                        pthread_mutexattr_destroy(&mutex_attr);
+                    }
+
+                    if (cond_attr_inited) {
+                        pthread_condattr_destroy(&cond_attr);
+                    }
                 }
 
                 return result;
             }
 
             void uninit_synchronization_objects() {
+                pthread_cond_broadcast(&control_block->c_can_r_con);
+                pthread_cond_broadcast(&control_block->c_can_w_con);
+                pthread_cond_broadcast(&control_block->s_can_r_con);
+                pthread_cond_broadcast(&control_block->s_can_w_con);
+
+                pthread_mutex_lock(&control_block->c_inited_lock);
+                while (control_block->c_inited) {
+                    pthread_cond_wait(&control_block->c_inited_state_con, &control_block->c_inited_lock);
+                }
+                pthread_mutex_unlock(&control_block->c_inited_lock);
+
                 pthread_cond_destroy(&control_block->c_can_r_con);
                 pthread_cond_destroy(&control_block->c_can_w_con);
                 pthread_cond_destroy(&control_block->s_can_r_con);
@@ -329,51 +398,50 @@ namespace simple::ipc {
                 auto& shared_buf = is_server ?  control_block->s_buf : control_block->c_buf;
                 auto cond_to_notify = is_server ? &control_block->s_can_r_con : &control_block->c_can_r_con;
 
+                auto w_buf = is_server ? (uint8_t*) control_block + sizeof(control_block_t) + rw_buf_len : (uint8_t*) control_block + sizeof(control_block_t);
+
                 while (!writing_thread_stopped) {
-                    std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
-                    if (waiting_for_sending_packets.empty()) {
-                        waiting_for_sending_packets_cond.wait(lk, [this]() {
-                            return true;
-                        });
-                    }
-
-                    if (writing_thread_stopped) {
-                        break;
-                    }
-
-                    pthread_mutex_lock(lock);
-
-                    while (!waiting_for_sending_packets.empty()) {
-                        auto pack = std::move(waiting_for_sending_packets.front());
-                        waiting_for_sending_packets.pop_front();
-
-                        auto pack_buf = encode_packet(pack.first);
-
-                        if (shared_buf.free_size() < pack_buf.size()) {
-                            timespec ts{0,0};
-                            timespec_get(&ts, TIME_UTC);
-                            ts.tv_nsec += cond_wait_time_ns;
-                            pthread_cond_timedwait(cond, lock, &ts);
+                    ibuffer pack_buf;
+                    request req;
+                    uint64_t pack_id = 0;
+                    {
+                        std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
+                        while (!writing_thread_stopped && waiting_for_sending_packets.empty()) {
+                            waiting_for_sending_packets_cond.wait(lk, [this]() {
+                                return !waiting_for_sending_packets.empty();
+                            });
                         }
 
                         if (writing_thread_stopped) {
                             break;
                         }
 
-                        if (shared_buf.free_size() < pack_buf.size()) {
-                            continue;
-                        }
+                        auto pack = std::move(waiting_for_sending_packets.front());
+                        waiting_for_sending_packets.pop_front();
 
-                        if (pack.second.should_wait_for_response()) {
-                            auto pack_id = packet_id(pack.first);
-                            std::unique_lock<std::mutex> lk_req(waiting_for_response_requests_mutex);
-                            waiting_for_response_requests[pack_id] = pack.second;
-                        }
-
-                        memcpy(shared_buf.write_head(), pack_buf.data(), pack_buf.size());
-                        shared_buf.commit(pack_buf.size());
-                        pthread_cond_signal(cond_to_notify);
+                        pack_buf = encode_packet(pack.first);
+                        pack_id = packet_id(pack.first);
+                        req = pack.second;
                     }
+
+                    pthread_mutex_lock(lock);
+                    while (!writing_thread_stopped && shared_buf.free_size() < pack_buf.size()) {
+                        pthread_cond_wait(cond, lock);
+                    }
+
+                    if (writing_thread_stopped) {
+                        pthread_mutex_unlock(lock);
+                        break;
+                    }
+
+                    if (req.should_wait_for_response()) {
+                        std::unique_lock<std::mutex> lk_req(waiting_for_response_requests_mutex);
+                        waiting_for_response_requests[pack_id] = req;
+                    }
+
+                    memcpy(shared_buf.write_head(w_buf), pack_buf.data(), pack_buf.size());
+                    shared_buf.commit(pack_buf.size());
+                    pthread_cond_signal(cond_to_notify);
 
                     pthread_mutex_unlock(lock);
                 }
@@ -384,19 +452,17 @@ namespace simple::ipc {
                 auto cond = is_server ? &control_block->c_can_r_con : &control_block->s_can_r_con;
                 auto& shared_buf = is_server ?  control_block->c_buf : control_block->s_buf;
                 auto cond_to_notify = is_server ? &control_block->c_can_w_con : &control_block->s_can_w_con;
+                auto r_buf = is_server ? (uint8_t*) control_block + sizeof(control_block_t) : (uint8_t*) control_block + sizeof(control_block_t) + rw_buf_len;
 
                 while (!reading_thread_stopped) {
                     pthread_mutex_lock(lock);
 
                     if (shared_buf.empty()) {
-                        timespec ts{0,0};
-                        timespec_get(&ts, TIME_UTC);
-                        ts.tv_nsec += cond_wait_time_ns;
-                        pthread_cond_timedwait(cond, lock, &ts);
+                        pthread_cond_wait(cond, lock);
                     }
 
                     if (!reading_thread_stopped && !shared_buf.empty()) {
-                        process_packet(shared_buf);
+                        process_packet(r_buf, shared_buf);
                         pthread_cond_signal(cond_to_notify);
                     }
 
@@ -404,10 +470,10 @@ namespace simple::ipc {
                 }
             }
 
-            void process_packet(linear_ringbuffer_t& recv_buffer) {
+            void process_packet(uint8_t* buf, linear_ringbuffer_t& recv_buffer) {
                 for(;;) {
                     size_t consume_len = 0;
-                    auto pack = decode_packet(recv_buffer.read_head(), recv_buffer.size(), consume_len);
+                    auto pack = decode_packet(recv_buffer.read_head(buf), recv_buffer.size(), consume_len);
                     recv_buffer.consume(consume_len);
 
                     if (!pack) {

@@ -4,19 +4,15 @@
 #include <stdexcept>
 #include <unistd.h>
 #include <cassert>
+#include <memory>
+#include <iostream>
 
 namespace simple::ipc {
 
         class linear_ringbuffer_t {
         public:
-            explicit linear_ringbuffer_t(uint8_t* buf = nullptr, size_t capacity = 0) noexcept
-                    : buffer_(buf), capacity_(capacity), head_(0), tail_(0), size_(0) {}
-
-            void reset(uint8_t* buf, size_t capacity) {
-                clear();
-                buffer_ = buf;
-                capacity_ = capacity;
-            }
+            explicit linear_ringbuffer_t(size_t capacity = 0) noexcept
+                    : capacity_(capacity), head_(0), tail_(0), size_(0) {}
 
             void commit(size_t n) noexcept {
                 assert(n <= (capacity_ - size_));
@@ -30,12 +26,12 @@ namespace simple::ipc {
                 size_ -= n;
             }
 
-            uint8_t* read_head() noexcept {
-                return buffer_ + head_;
+            uint8_t* read_head(unsigned char *buffer) noexcept {
+                return buffer + head_;
             }
 
-            uint8_t* write_head() noexcept {
-                return buffer_ + tail_;
+            uint8_t* write_head(unsigned char *buffer) noexcept {
+                return buffer + tail_;
             }
 
             void clear() noexcept {
@@ -59,7 +55,6 @@ namespace simple::ipc {
                 return capacity_ - size_;
             }
         private:
-            unsigned char *buffer_{};
             size_t capacity_{};
             size_t head_{};
             size_t tail_{};

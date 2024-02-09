@@ -134,7 +134,7 @@ namespace simple::ipc {
 
                 while (!stopped) {
                     int nfd = epoll_wait(epoll_fd, events, max_fd_size, -1);
-                    if (nfd < 0) {
+                    if (nfd < 0 && errno != EINTR) {
                         break;
                     }
 
