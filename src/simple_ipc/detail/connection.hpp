@@ -452,8 +452,12 @@ namespace simple::ipc {
                         break;
                     }
 
-                    while (!writing_thread_stopped && shared_buf.free_size() < pack_buf.size()) {
+                    auto last_free_size = shared_buf.free_size();
+                    if (last_free_size < pack_buf.size()) {
                         pthread_cond_wait(cond, lock);
+                        if (shared_buf.free_size() <= last_free_size) {
+                            break;
+                        }
                     }
 
                     if (writing_thread_stopped) {
@@ -492,10 +496,12 @@ namespace simple::ipc {
                         pthread_cond_wait(cond, lock);
                     }
 
-                    if (!reading_thread_stopped && !shared_buf.empty()) {
-                        process_packet(r_buf, shared_buf);
-                        pthread_cond_signal(cond_to_notify);
+                    if (reading_thread_stopped || shared_buf.empty()) {
+                        break;
                     }
+
+                    process_packet(r_buf, shared_buf);
+                    pthread_cond_signal(cond_to_notify);
 
                     if (pthread_mutex_unlock(lock) != 0) {
                         break;
