@@ -13,7 +13,7 @@ int main(int argc, char** argv) {
 
     server.register_request_processor(1, [&server, &body](std::unique_ptr<simple::ipc::packet> req) {
         std::cout << "recv req = " << (char*)req->body().data() << std::endl;
-        auto rsp = simple::ipc::build_rsp_packet(req->process_id(), req->cmd(), req->seq(), 0, (uint8_t*)body, sizeof(body));
+        auto rsp = simple::ipc::build_rsp_packet(req->connection_id(), req->cmd(), req->seq(), 0, (uint8_t*)body, sizeof(body));
         server.send_packet(std::move(rsp));
     });
 

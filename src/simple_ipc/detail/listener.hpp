@@ -29,7 +29,7 @@ namespace simple::ipc {
             class construct_failed_exception : public std::exception {
             };
         public:
-            using callback_t = std::function<bool(int fd)>;
+            using callback_t = std::function<bool(uint32_t connection_id, int fd)>;
         public:
             listener_t(std::string server_name, callback_t callback)
                     : s_name(std::move(server_name)), cb(std::move(callback)), should_stop(true), sock_fd(-1) {
@@ -85,15 +85,16 @@ namespace simple::ipc {
                         continue;
                     }
 
-                    if(cb(mem_fd)) {
-                        send_fd(conn, mem_fd);
+                    auto connection_id = ++cur_connection_id;
+                    if(cb(connection_id, mem_fd)) {
+                        send_fd(conn, connection_id, mem_fd);
                     }
 
                     close(mem_fd);
                 }
             }
 
-            static void send_fd(int conn, int fd) {
+            static void send_fd(int conn, uint32_t connection_id, int fd) {
                 struct msghdr msgh{};
                 struct iovec iov{};
                 union {
@@ -102,9 +103,8 @@ namespace simple::ipc {
                     char control[CMSG_SPACE(sizeof(int))];
                 } control_un{};
 
-                uint64_t id = unique_id();
-                iov.iov_base = &id;
-                iov.iov_len = sizeof(char);
+                iov.iov_base = &connection_id;
+                iov.iov_len = sizeof(connection_id);
 
                 msgh.msg_name = nullptr;
                 msgh.msg_namelen = 0;
@@ -155,6 +155,7 @@ namespace simple::ipc {
             std::thread thread;
             volatile std::atomic<bool> should_stop;
             int sock_fd;
+            std::atomic<uint32_t> cur_connection_id{0};
         };
 
 }

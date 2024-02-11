@@ -73,29 +73,25 @@ namespace simple::ipc {
             using map_packid_2_callback_t = std::unordered_map<uint64_t, request_t >;
             using packet_list_t = std::list<std::pair<std::unique_ptr<packet>, request_t>>;
         public:
-            using got_process_id_callback_t = std::function<void(connection_t* conn, uint32_t process_id)>;
             using disconnected_callback_t = std::function<void(connection_t* conn, uint32_t process_id)>;
             using receive_push_callback_t = std::function<void(connection_t* conn, std::unique_ptr<packet>)>;
         public:
             connection_t(bool server, timer_mgr_t& t
                          , disconnected_callback_t disconnected_cb
-                         , receive_push_callback_t receive_req_cb
-                         , got_process_id_callback_t got_process_id_cb
-                         , uint32_t proc_id = 0)
+                         , receive_push_callback_t receive_req_cb)
             : is_server(server), inited(false), timer(t), timer_id(-1), control_block(nullptr)
             , writing_thread_stopped(false), reading_thread_stopped(false)
             , last_recv_time(std::chrono::steady_clock::now())
             , disconnected_callback(std::move(disconnected_cb))
             , receive_req_callback(std::move(receive_req_cb))
-            , got_process_id_callback(std::move(got_process_id_cb))
-            , process_id(proc_id) {
+            , connection_id(0) {
             }
 
             ~connection_t() {
                 stop();
             }
 
-            bool start(int mem_fd) {
+            bool start(uint32_t conn_id, int mem_fd) {
                 if (inited) {
                     return true;
                 }
@@ -116,12 +112,12 @@ namespace simple::ipc {
                     }
                 } else {
                     //only unlock when stop or process kill, server can check if client connection is alive
-                    pthread_mutex_lock(&control_block->c_lifetime_lock);
                     c_lifetime_thread = std::thread([this]() {
                         c_lifetime_proc();
                     });
                 }
 
+                connection_id = conn_id;
                 writing_thread_stopped = false;
                 writing_thread = std::thread([this]() {
                     write_proc();
@@ -172,7 +168,7 @@ namespace simple::ipc {
                     if (c_lifetime_thread.joinable()) {
                         c_lifetime_thread.join();
                     }
-                    pthread_mutex_unlock(&control_block->c_lifetime_lock);
+                    //pthread_mutex_unlock(&control_block->c_lifetime_lock);
                 }
 
                 unmap_shared_memory();
@@ -408,6 +404,7 @@ namespace simple::ipc {
             }
 
             void wait_for_client_finished_uninit_connection() {
+                std::cout << "s lock" << std::endl;
                 pthread_mutex_lock(&control_block->c_lifetime_lock);
             }
 
@@ -435,6 +432,10 @@ namespace simple::ipc {
 
                         auto pack = std::move(waiting_for_sending_packets.front());
                         waiting_for_sending_packets.pop_front();
+
+                        if (pack.first->connection_id() == 0) {
+                            pack.first->set_connection_id(connection_id);
+                        }
 
                         pack_buf = encode_packet(pack.first);
                         pack_id = packet_id(pack.first);
@@ -497,6 +498,8 @@ namespace simple::ipc {
             }
 
             void c_lifetime_proc() {
+                pthread_mutex_lock(&control_block->c_lifetime_lock);
+
                 do {
                     if (pthread_mutex_lock(&control_block->c_should_stop_lock) != 0) {
                         return;
@@ -505,7 +508,9 @@ namespace simple::ipc {
                     pthread_mutex_unlock(&control_block->c_should_stop_lock);
                 } while (false);
 
-                disconnected_callback(this, process_id);
+                std::cout << "c unlock" << std::endl;
+                pthread_mutex_unlock(&control_block->c_lifetime_lock);
+                disconnected_callback(this, connection_id);
             }
 
             void process_packet(uint8_t* buf, linear_ringbuffer_t& recv_buffer) {
@@ -514,27 +519,11 @@ namespace simple::ipc {
                     auto pack = decode_packet(recv_buffer.read_head(buf), recv_buffer.size(), consume_len);
                     recv_buffer.consume(consume_len);
 
-                    if (!pack) {
+                    if (!pack || pack->connection_id() != connection_id) {
                         return;
                     }
 
-                    auto pack_process_id = pack->process_id();
-                    if (pack_process_id == 0) {
-                        continue;
-                    }
-
-                    if (process_id == 0) {
-                        process_id = pack_process_id;
-                        if (got_process_id_callback) {
-                            got_process_id_callback(this, process_id);
-                        }
-                    } else if (process_id != pack_process_id) {
-                        disconnected_callback(this, process_id);
-                        break;
-                    }
-
                     last_recv_time = std::chrono::steady_clock::now();
-                    process_id = pack->process_id();
 
                     if (pack->is_response()) {
                         uint64_t pack_id = packet_id(pack);
@@ -555,7 +544,7 @@ namespace simple::ipc {
                 auto now = std::chrono::steady_clock::now();
                 auto elapse = std::chrono::duration_cast<std::chrono::seconds>(now - last_recv_time).count();
                 if (elapse > active_connection_lifetime_seconds) {
-                    disconnected_callback(this, process_id);
+                    disconnected_callback(this, connection_id);
                     return;
                 }
 
@@ -597,9 +586,8 @@ namespace simple::ipc {
             std::chrono::steady_clock::time_point last_recv_time;
             disconnected_callback_t disconnected_callback;
             receive_push_callback_t receive_req_callback;
-            got_process_id_callback_t got_process_id_callback;
 
-            uint32_t process_id;
+            uint32_t connection_id;
         };
 
     }

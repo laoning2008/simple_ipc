@@ -13,24 +13,20 @@ namespace simple::ipc {
         class connection_mgr_t {
         public:
             using map_process_2_connection_t = std::unordered_map<uint32_t , std::unique_ptr<connection_t>>;
-            using connection_list_t = std::list<std::unique_ptr<connection_t>>;
             using map_cmd_2_callback_t = std::unordered_map<uint32_t, recv_callback_t >;
         public:
-            bool new_connection(int fd) {
+            bool new_connection(uint32_t connection_id, int fd) {
                 auto connection = std::make_unique<connection_t>(true, timer
-                        , [this](connection_t* conn, uint32_t process_id){ on_disconnected(conn, process_id);}
-                        , [this](connection_t* conn, std::unique_ptr<packet> pack){on_receive_req(conn, std::move(pack));}
-                        , [this](connection_t* conn, uint32_t process_id){ on_got_process_id(conn, process_id);});
+                        , [this](connection_t* conn, uint32_t connection_id){ on_disconnected(conn, connection_id);}
+                        , [this](connection_t* conn, std::unique_ptr<packet> pack){on_receive_req(conn, std::move(pack));});
 
-                if (!connection->start(fd)) {
+                if (!connection->start(connection_id, fd)) {
                     close(fd);
                     return false;
                 }
 
-                {
-                    std::unique_lock<std::mutex> lk(temp_connections_mutex);
-                    temp_connections.push_back(std::move(connection));
-                }
+                std::unique_lock<std::mutex> lk_conns(connections_mutex);
+                connections[connection_id] = std::move(connection);
 
                 return true;
             }
@@ -45,9 +41,9 @@ namespace simple::ipc {
             }
 
             bool send_packet(std::unique_ptr<packet> pack, recv_callback_t cb, uint32_t timeout_secs) {
-                uint32_t process_id = pack->process_id();
+                uint32_t connection_id = pack->connection_id();
                 std::unique_lock<std::mutex> lk(connections_mutex);
-                auto it = connections.find(process_id);
+                auto it = connections.find(connection_id);
                 if (it == connections.end()) {
                     return false;
                 }
@@ -56,9 +52,9 @@ namespace simple::ipc {
                 return true;
             }
 
-            bool cancel_sending(uint32_t process_id, uint32_t cmd, uint32_t seq) {
+            bool cancel_sending(uint32_t connection_id, uint32_t cmd, uint32_t seq) {
                 std::unique_lock<std::mutex> lk(connections_mutex);
-                auto it = connections.find(process_id);
+                auto it = connections.find(connection_id);
                 if (it == connections.end()) {
                     return false;
                 }
@@ -77,33 +73,9 @@ namespace simple::ipc {
                 req_processors.erase(cmd);
             }
         private:
-            void on_got_process_id(connection_t* conn, uint32_t process_id) {
-                std::unique_lock<std::mutex> lk(temp_connections_mutex);
-                for (auto it = temp_connections.begin(); it != temp_connections.end(); ++it) {
-                    if ((*it).get() == conn) {
-                        {
-                            std::unique_lock<std::mutex> lk_conns(connections_mutex);
-                            connections[process_id] = std::move(*it);
-                        }
-
-                        temp_connections.erase(it);
-                        break;
-                    }
-                }
-            }
-
-            void on_disconnected(connection_t* conn, uint32_t process_id) {
-                {
-                    std::unique_lock<std::mutex> lk(connections_mutex);
-                    connections.erase(process_id);
-                }
-
-                {
-                    std::unique_lock<std::mutex> lk(temp_connections_mutex);
-                    temp_connections.erase(std::remove_if(temp_connections.begin(), temp_connections.end(), [conn](const std::unique_ptr<connection_t>& it) {
-                        return it.get() == conn;
-                    }), temp_connections.end());
-                }
+            void on_disconnected(connection_t* conn, uint32_t connection_id) {
+                std::unique_lock<std::mutex> lk(connections_mutex);
+                connections.erase(connection_id);
             }
 
             void on_receive_req(connection_t* conn, std::unique_ptr<packet> pack) {
@@ -113,13 +85,8 @@ namespace simple::ipc {
                     it->second(std::move(pack));
                 }
             }
-
-
         private:
             timer_mgr_t timer;
-
-            connection_list_t temp_connections;
-            std::mutex temp_connections_mutex;
 
             map_process_2_connection_t connections;
             std::mutex connections_mutex;

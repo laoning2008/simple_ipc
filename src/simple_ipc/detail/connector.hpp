@@ -24,7 +24,7 @@
 namespace simple::ipc {
         class connector_t {
         public:
-            using callback_t = std::function<void(int fd)>;
+            using callback_t = std::function<void(uint32_t connection_id, int fd)>;
         public:
             connector_t(std::string server_name, callback_t callback)
                     : s_name(std::move(server_name)), conn_fd(-1), cb(std::move(callback)), should_stop(true) {
@@ -76,11 +76,11 @@ namespace simple::ipc {
                     }
 
                     if (conn_fd == -1) {
-                        cb(-1);
+                        cb(0, -1);
                         continue;
                     }
 
-                    int mem_fd = receive_fd();
+                    auto [connection_id, mem_fd] = receive_fd();
                     close(conn_fd);
                     conn_fd = -1;
 
@@ -90,7 +90,7 @@ namespace simple::ipc {
                         }
                         break;
                     }
-                    cb(mem_fd);
+                    cb(connection_id, mem_fd);
                     if (mem_fd != -1) {
                         close(mem_fd);
                     }
@@ -120,9 +120,9 @@ namespace simple::ipc {
                 return -1;
             }
 
-            [[nodiscard]] int receive_fd() const {
+            [[nodiscard]] std::pair<uint32_t, int> receive_fd() const {
                 if (conn_fd == -1) {
-                    return -1;
+                    return {0, -1};
                 }
 
                 struct msghdr msgh{};
@@ -133,9 +133,9 @@ namespace simple::ipc {
                 } control_un{};
                 struct cmsghdr *cmsgh;
 
-                uint64_t id = 0;
-                iov.iov_base = &id;
-                iov.iov_len = sizeof(id);
+                uint32_t connection_id = 0;
+                iov.iov_base = &connection_id;
+                iov.iov_len = sizeof(connection_id);
 
                 msgh.msg_name = nullptr;
                 msgh.msg_namelen = 0;
@@ -145,15 +145,16 @@ namespace simple::ipc {
                 msgh.msg_controllen = sizeof(control_un.control);
 
                 if (recvmsg(conn_fd, &msgh, 0) == -1) {
-                    return -1;
+                    return {0, -1};
                 }
 
                 cmsgh = CMSG_FIRSTHDR(&msgh);
                 if (cmsgh == nullptr || cmsgh->cmsg_level != SOL_SOCKET || cmsgh->cmsg_type != SCM_RIGHTS) {
-                    return -1;
+                    return {0, -1};
                 }
 
-                return *((int *) CMSG_DATA(cmsgh));
+                int mem_fd = *((int *) CMSG_DATA(cmsgh));
+                return {connection_id, mem_fd};
             }
         private:
             std::string s_name;

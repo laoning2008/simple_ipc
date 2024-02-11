@@ -9,7 +9,7 @@ namespace simple::ipc {
         class server_t {
         public:
             explicit server_t(std::string server_name)
-            : listener(std::move(server_name), [this](int fd){return on_new_connection(fd);}) {
+            : listener(std::move(server_name), [this](uint64_t connection_id, int fd){return on_new_connection(connection_id, fd);}) {
             }
 
             bool send_packet(std::unique_ptr<packet> pack) {
@@ -32,8 +32,8 @@ namespace simple::ipc {
                 conn_mgr.unregister_request_processor(cmd);
             }
         private:
-            bool on_new_connection(int fd) {
-                return conn_mgr.new_connection(fd);
+            bool on_new_connection(uint64_t connection_id, int fd) {
+                return conn_mgr.new_connection(connection_id, fd);
             }
         private:
             listener_t listener;

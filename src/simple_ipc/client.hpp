@@ -27,12 +27,10 @@ namespace simple::ipc {
             using map_cmd_2_callback_t = std::unordered_map<uint32_t, recv_callback_t >;
         public:
             explicit client_t(std::string server_name)
-            : process_id(getpid())
-            , connection_state(state_connecting)
-            , connector(std::move(server_name), [this](int fd){ on_connected(fd);})
+            : connection_state(state_connecting)
+            , connector(std::move(server_name), [this](uint32_t connection_id, int fd){ on_connected(connection_id, fd);})
             , connection(false, timer, [this](connection_t* conn, uint32_t id){ on_disconnected(conn, id);}
-                            , [this](connection_t* conn, std::unique_ptr<packet> pack){on_receive_req(conn, std::move(pack));}
-                            , nullptr, process_id) {
+                            , [this](connection_t* conn, std::unique_ptr<packet> pack){on_receive_req(conn, std::move(pack));}) {
                 timer.start_timer([this](){on_heartbeat_timer();}, heartbeat_interval_ms, false);
                 timer.start_timer([this](){on_reconnect_timer();}, reconnect_check_interval_ms, false);
             }
@@ -59,19 +57,24 @@ namespace simple::ipc {
                 req_processors.erase(cmd);
             }
         private:
-            void on_connected(int fd) {
+            void on_connected(uint32_t connection_id, int fd) {
+                std::cout << "on_connected begin, fd = " << fd << std::endl;
                 connection.stop();
 
-                if (fd != -1 && connection.start(fd)) {
+                if (fd != -1 && connection.start(connection_id, fd)) {
                     connection_state = state_connected;
                 } else {
                     connection_state = state_disconnected;
                 }
+
+                std::cout << "on_connected end" << std::endl;
             }
 
             void on_disconnected(connection_t* conn, uint32_t id) {
-                //connection.stop();
+                std::cout << "on_disconnected begin" << std::endl;
+                connection.stop();
                 connection_state = state_disconnected;
+                std::cout << "on_disconnected end" << std::endl;
             }
 
             void on_receive_req(connection_t* conn,  std::unique_ptr<packet> pack) {
@@ -83,7 +86,7 @@ namespace simple::ipc {
             }
 
             void on_heartbeat_timer() {
-                auto heartbeat_pack = build_req_packet(process_id, heartbeat_cmd, nullptr, 0);
+                auto heartbeat_pack = build_req_packet(0, heartbeat_cmd, nullptr, 0);
                 connection.send_packet(std::move(heartbeat_pack));
             }
 
@@ -96,8 +99,6 @@ namespace simple::ipc {
                 connector.reconnect();
             }
         private:
-            uint32_t process_id;
-
             std::atomic<int> connection_state;
 
             timer_mgr_t timer;
