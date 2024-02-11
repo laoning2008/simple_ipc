@@ -24,9 +24,9 @@ namespace simple::ipc {
     using recv_callback_t = std::function<void(std::unique_ptr<packet> pack)>;
 
         struct control_block_t {
-            bool c_inited = false;
-            pthread_cond_t c_inited_state_con{};
-            pthread_mutex_t c_inited_lock{};
+            pthread_cond_t c_should_stop_con{};
+            pthread_mutex_t c_should_stop_lock{};
+            pthread_mutex_t c_lifetime_lock{};
 
             pthread_mutex_t c_lock{};
             pthread_mutex_t s_lock{};
@@ -115,10 +115,11 @@ namespace simple::ipc {
                         return false;
                     }
                 } else {
-                    pthread_mutex_lock(&control_block->c_inited_lock);
-                    control_block->c_inited = true;
-                    pthread_cond_signal(&control_block->c_inited_state_con);
-                    pthread_mutex_unlock(&control_block->c_inited_lock);
+                    //only unlock when stop or process kill, server can check if client connection is alive
+                    pthread_mutex_lock(&control_block->c_lifetime_lock);
+                    c_lifetime_thread = std::thread([this]() {
+                        c_lifetime_proc();
+                    });
                 }
 
                 writing_thread_stopped = false;
@@ -148,6 +149,7 @@ namespace simple::ipc {
 
                 writing_thread_stopped = true;
                 reading_thread_stopped = true;
+
                 waiting_for_sending_packets_cond.notify_one();
 
                 auto cond_r_notify = is_server ? &control_block->c_can_r_con : &control_block->s_can_r_con;
@@ -166,10 +168,11 @@ namespace simple::ipc {
                 if (is_server) {
                     uninit_control_block();
                 } else {
-                    pthread_mutex_lock(&control_block->c_inited_lock);
-                    control_block->c_inited = false;
-                    pthread_cond_signal(&control_block->c_inited_state_con);
-                    pthread_mutex_unlock(&control_block->c_inited_lock);
+                    pthread_cond_signal(&control_block->c_should_stop_con);
+                    if (c_lifetime_thread.joinable()) {
+                        c_lifetime_thread.join();
+                    }
+                    pthread_mutex_unlock(&control_block->c_lifetime_lock);
                 }
 
                 unmap_shared_memory();
@@ -225,8 +228,6 @@ namespace simple::ipc {
                     return false;
                 }
 
-                control_block->c_inited = false;
-
                 control_block->c_buf = linear_ringbuffer_t{rw_buf_len};
                 control_block->s_buf = linear_ringbuffer_t{rw_buf_len};
 
@@ -234,11 +235,8 @@ namespace simple::ipc {
             }
 
             void uninit_control_block() {
-                uninit_synchronization_objects();
                 control_block->c_buf.clear();
                 control_block->s_buf.clear();
-
-                control_block->c_inited = false;
 
                 uninit_synchronization_objects();
             }
@@ -249,8 +247,9 @@ namespace simple::ipc {
 
                 bool mutex_attr_inited = false;
                 bool cond_attr_inited = false;
-                bool c_inited_state_lock_inited = false;
-                bool c_inited_state_cond_inited = false;
+                bool c_lifetime_lock_inited = false;
+                bool c_should_stop_cond_inited = false;
+                bool c_should_stop_lock_inited = false;
                 bool c_lock_inited = false;
                 bool s_lock_inited = false;
                 bool c_can_r_con_inited = false;
@@ -281,15 +280,20 @@ namespace simple::ipc {
                         break;
                     }
 
-                    if (pthread_mutex_init(&control_block->c_inited_lock, &mutex_attr) != 0) {
+                    if (pthread_mutex_init(&control_block->c_lifetime_lock, &mutex_attr) != 0) {
                         break;
                     }
-                    c_inited_state_lock_inited = true;
+                    c_lifetime_lock_inited = true;
 
-                    if (pthread_cond_init(&control_block->c_inited_state_con, &cond_attr) != 0) {
+                    if (pthread_mutex_init(&control_block->c_should_stop_lock, &mutex_attr) != 0) {
                         break;
                     }
-                    c_inited_state_cond_inited = true;
+                    c_should_stop_lock_inited = true;
+
+                    if (pthread_cond_init(&control_block->c_should_stop_con, &cond_attr) != 0) {
+                        break;
+                    }
+                    c_should_stop_cond_inited = true;
 
 
                     if (pthread_mutex_init(&control_block->c_lock, &mutex_attr) != 0) {
@@ -351,12 +355,16 @@ namespace simple::ipc {
                         pthread_cond_destroy(&control_block->s_can_r_con);
                     }
 
-                    if (c_inited_state_lock_inited) {
-                        pthread_mutex_destroy(&control_block->c_inited_lock);
+                    if (c_lifetime_lock_inited) {
+                        pthread_mutex_destroy(&control_block->c_lifetime_lock);
                     }
 
-                    if (c_inited_state_cond_inited) {
-                        pthread_cond_destroy(&control_block->c_inited_state_con);
+                    if (c_should_stop_lock_inited) {
+                        pthread_mutex_destroy(&control_block->c_should_stop_lock);
+                    }
+
+                    if (c_should_stop_cond_inited) {
+                        pthread_cond_destroy(&control_block->c_should_stop_con);
                     }
 
                     if (mutex_attr_inited) {
@@ -377,22 +385,30 @@ namespace simple::ipc {
                 pthread_cond_broadcast(&control_block->s_can_r_con);
                 pthread_cond_broadcast(&control_block->s_can_w_con);
 
-//                pthread_mutex_lock(&control_block->c_inited_lock);
-//                while (control_block->c_inited) {
-//                    pthread_cond_wait(&control_block->c_inited_state_con, &control_block->c_inited_lock);
-//                }
-//                pthread_mutex_unlock(&control_block->c_inited_lock);
-//
-//                pthread_cond_destroy(&control_block->c_can_r_con);
-//                pthread_cond_destroy(&control_block->c_can_w_con);
-//                pthread_cond_destroy(&control_block->s_can_r_con);
-//                pthread_cond_destroy(&control_block->s_can_w_con);
-//
-//                pthread_mutex_destroy(&control_block->c_lock);
-//                pthread_mutex_destroy(&control_block->s_lock);
-//
-//                pthread_cond_destroy(&control_block->c_inited_state_con);
-//                pthread_mutex_destroy(&control_block->c_inited_lock);
+                pthread_cond_broadcast(&control_block->c_should_stop_con);
+                wait_for_client_finished_uninit_connection();
+
+                //https://stackoverflow.com/questions/20439404/pthread-conditions-and-process-termination
+                control_block->c_can_r_con.__data.__wrefs = 0;
+                control_block->c_can_w_con.__data.__wrefs = 0;
+                control_block->s_can_r_con.__data.__wrefs = 0;
+                control_block->s_can_w_con.__data.__wrefs = 0;
+                pthread_cond_destroy(&control_block->c_can_r_con);
+                pthread_cond_destroy(&control_block->c_can_w_con);
+                pthread_cond_destroy(&control_block->s_can_r_con);
+                pthread_cond_destroy(&control_block->s_can_w_con);
+
+                pthread_mutex_destroy(&control_block->c_lock);
+                pthread_mutex_destroy(&control_block->s_lock);
+
+                control_block->c_should_stop_con.__data.__wrefs = 0;
+                pthread_cond_destroy(&control_block->c_should_stop_con);
+                pthread_mutex_destroy(&control_block->c_should_stop_lock);
+                pthread_mutex_destroy(&control_block->c_lifetime_lock);
+            }
+
+            void wait_for_client_finished_uninit_connection() {
+                pthread_mutex_lock(&control_block->c_lifetime_lock);
             }
 
             void write_proc() {
@@ -425,7 +441,10 @@ namespace simple::ipc {
                         req = pack.second;
                     }
 
-                    pthread_mutex_lock(lock);
+                    if (pthread_mutex_lock(lock) != 0) {
+                        break;
+                    }
+
                     while (!writing_thread_stopped && shared_buf.free_size() < pack_buf.size()) {
                         pthread_cond_wait(cond, lock);
                     }
@@ -444,7 +463,9 @@ namespace simple::ipc {
                     shared_buf.commit(pack_buf.size());
                     pthread_cond_signal(cond_to_notify);
 
-                    pthread_mutex_unlock(lock);
+                    if (pthread_mutex_unlock(lock) != 0) {
+                        break;
+                    }
                 }
             }
 
@@ -456,7 +477,9 @@ namespace simple::ipc {
                 auto r_buf = is_server ? (uint8_t*) control_block + sizeof(control_block_t) : (uint8_t*) control_block + sizeof(control_block_t) + rw_buf_len;
 
                 while (!reading_thread_stopped) {
-                    pthread_mutex_lock(lock);
+                    if (pthread_mutex_lock(lock) != 0) {
+                        break;
+                    }
 
                     if (shared_buf.empty()) {
                         pthread_cond_wait(cond, lock);
@@ -467,8 +490,22 @@ namespace simple::ipc {
                         pthread_cond_signal(cond_to_notify);
                     }
 
-                    pthread_mutex_unlock(lock);
+                    if (pthread_mutex_unlock(lock) != 0) {
+                        break;
+                    }
                 }
+            }
+
+            void c_lifetime_proc() {
+                do {
+                    if (pthread_mutex_lock(&control_block->c_should_stop_lock) != 0) {
+                        return;
+                    }
+                    pthread_cond_wait(&control_block->c_should_stop_con, &control_block->c_should_stop_lock);
+                    pthread_mutex_unlock(&control_block->c_should_stop_lock);
+                } while (false);
+
+                disconnected_callback(this, process_id);
             }
 
             void process_packet(uint8_t* buf, linear_ringbuffer_t& recv_buffer) {
@@ -493,6 +530,7 @@ namespace simple::ipc {
                         }
                     } else if (process_id != pack_process_id) {
                         disconnected_callback(this, process_id);
+                        break;
                     }
 
                     last_recv_time = std::chrono::steady_clock::now();
@@ -518,6 +556,7 @@ namespace simple::ipc {
                 auto elapse = std::chrono::duration_cast<std::chrono::seconds>(now - last_recv_time).count();
                 if (elapse > active_connection_lifetime_seconds) {
                     disconnected_callback(this, process_id);
+                    return;
                 }
 
                 std::unique_lock<std::mutex> lk(waiting_for_response_requests_mutex);
@@ -552,6 +591,8 @@ namespace simple::ipc {
 
             std::thread reading_thread;
             volatile std::atomic<bool> reading_thread_stopped;
+
+            std::thread c_lifetime_thread;
 
             std::chrono::steady_clock::time_point last_recv_time;
             disconnected_callback_t disconnected_callback;

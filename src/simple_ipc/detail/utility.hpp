@@ -16,6 +16,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <cstring>
+#include <random>
 
 namespace simple::ipc {
 
@@ -31,5 +32,12 @@ namespace simple::ipc {
 
             flags |= O_NONBLOCK;
             return fcntl(fd, F_SETFL, flags) == 0;
+        }
+
+        inline uint64_t unique_id() {
+            std::random_device rd;
+            std::mt19937_64 gen(rd());
+            std::uniform_int_distribution<uint64_t> dis;
+            return dis(gen);
         }
 }

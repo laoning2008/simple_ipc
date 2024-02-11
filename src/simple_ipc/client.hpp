@@ -70,6 +70,7 @@ namespace simple::ipc {
             }
 
             void on_disconnected(connection_t* conn, uint32_t id) {
+                //connection.stop();
                 connection_state = state_disconnected;
             }
 

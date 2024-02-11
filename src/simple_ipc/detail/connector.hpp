@@ -133,9 +133,9 @@ namespace simple::ipc {
                 } control_un{};
                 struct cmsghdr *cmsgh;
 
-                char placeholder = 0;
-                iov.iov_base = &placeholder;
-                iov.iov_len = sizeof(char);
+                uint64_t id = 0;
+                iov.iov_base = &id;
+                iov.iov_len = sizeof(id);
 
                 msgh.msg_name = nullptr;
                 msgh.msg_namelen = 0;

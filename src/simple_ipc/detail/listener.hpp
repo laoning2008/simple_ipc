@@ -19,6 +19,7 @@
 
 
 #include "simple_ipc/detail/connection_mgr.hpp"
+#include "simple_ipc/detail/utility.hpp"
 
 namespace simple::ipc {
 
@@ -101,8 +102,8 @@ namespace simple::ipc {
                     char control[CMSG_SPACE(sizeof(int))];
                 } control_un{};
 
-                char placeholder = 'A';
-                iov.iov_base = &placeholder;
+                uint64_t id = unique_id();
+                iov.iov_base = &id;
                 iov.iov_len = sizeof(char);
 
                 msgh.msg_name = nullptr;
