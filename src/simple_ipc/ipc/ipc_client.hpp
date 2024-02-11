@@ -14,7 +14,7 @@
 using namespace std::placeholders;
 
 namespace simple::ipc {
-        class client_t {
+        class ipc_client_t {
             constexpr static const int state_connected = 1;
             constexpr static const int state_disconnected = 2;
             constexpr static const int state_connecting = 3;
@@ -26,7 +26,7 @@ namespace simple::ipc {
             using recv_callback_t = std::function<void(std::unique_ptr<packet> pack)>;
             using map_cmd_2_callback_t = std::unordered_map<uint32_t, recv_callback_t >;
         public:
-            explicit client_t(std::string server_name)
+            explicit ipc_client_t(std::string server_name)
             : connection_state(state_connecting)
             , connector(std::move(server_name), [this](uint32_t connection_id, int fd){ on_connected(connection_id, fd);})
             , connection(false, timer, [this](connection_t* conn, uint32_t id){ on_disconnected(conn, id);}
@@ -58,7 +58,7 @@ namespace simple::ipc {
             }
         private:
             void on_connected(uint32_t connection_id, int fd) {
-                std::cout << "on_connected begin, fd = " << fd << std::endl;
+//                std::cout << "on_connected begin, fd = " << fd << std::endl;
                 connection.stop();
 
                 if (fd != -1 && connection.start(connection_id, fd)) {
@@ -67,7 +67,7 @@ namespace simple::ipc {
                     connection_state = state_disconnected;
                 }
 
-                std::cout << "on_connected end" << std::endl;
+//                std::cout << "on_connected end" << std::endl;
             }
 
             void on_disconnected(connection_t* conn, uint32_t id) {

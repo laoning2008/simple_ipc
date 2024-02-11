@@ -1,4 +1,4 @@
-#include <simple_ipc/server.hpp>
+#include <simple_ipc/ipc/ipc_server.hpp>
 #include <thread>
 #include <csignal>
 #include <iostream>
@@ -8,7 +8,7 @@ const char* server_name = "simple_ipc";
 volatile bool stoped = false;
 
 int main(int argc, char** argv) {
-    simple::ipc::server_t server{server_name};
+    simple::ipc::ipc_server_t server{server_name};
     uint8_t body[6] = {'w', 'o', 'r', 'l', 'd', '\0'};
 
     server.register_request_processor(1, [&server, &body](std::unique_ptr<simple::ipc::packet> req) {

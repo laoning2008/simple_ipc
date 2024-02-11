@@ -6,9 +6,9 @@
 using namespace std::placeholders;
 
 namespace simple::ipc {
-        class server_t {
+        class ipc_server_t {
         public:
-            explicit server_t(std::string server_name)
+            explicit ipc_server_t(std::string server_name)
             : listener(std::move(server_name), [this](uint64_t connection_id, int fd){return on_new_connection(connection_id, fd);}) {
             }
 

@@ -42,7 +42,8 @@ namespace simple::ipc {
 
         constexpr static const size_t rw_buf_len = 1024 * 1024;
         constexpr static const uint32_t active_connection_lifetime_seconds = 6;
-        constexpr static const uint64_t timer_interval_ms = 1 * 1000;
+        constexpr static const uint64_t alive_check_timer_interval_ms = 1 * 1000;
+        constexpr static const uint64_t request_timeout_check_timer_interval_ms = 1 * 1000;
 
         static size_t cal_mem_size() {
             static const size_t PAGE_SIZE = sysconf(_SC_PAGESIZE);
@@ -79,15 +80,19 @@ namespace simple::ipc {
             connection_t(bool server, timer_mgr_t& t
                          , disconnected_callback_t disconnected_cb
                          , receive_push_callback_t receive_req_cb)
-            : is_server(server), inited(false), timer(t), timer_id(-1), control_block(nullptr)
+            : is_server(server), inited(false), timer(t), alive_check_timer_id(-1), request_timeout_check_timer_id(-1), control_block(nullptr)
             , writing_thread_stopped(false), reading_thread_stopped(false)
             , last_recv_time(std::chrono::steady_clock::now())
             , disconnected_callback(std::move(disconnected_cb))
             , receive_req_callback(std::move(receive_req_cb))
             , connection_id(0) {
+                request_timeout_check_timer_id = timer.start_timer([this]() {
+                    on_request_timeout_check_timer();
+                }, request_timeout_check_timer_interval_ms, false);
             }
 
             ~connection_t() {
+                timer.stop_timer(request_timeout_check_timer_id);
                 stop();
             }
 
@@ -117,6 +122,7 @@ namespace simple::ipc {
                     });
                 }
 
+                last_recv_time = std::chrono::steady_clock::now();
                 connection_id = conn_id;
                 writing_thread_stopped = false;
                 writing_thread = std::thread([this]() {
@@ -128,7 +134,7 @@ namespace simple::ipc {
                     read_proc();
                 });
 
-                timer_id = timer.start_timer([this](){on_timer();}, timer_interval_ms, false);
+                alive_check_timer_id = timer.start_timer([this](){on_alive_check_timer();}, alive_check_timer_interval_ms, false);
 
                 inited = true;
                 return true;
@@ -140,8 +146,8 @@ namespace simple::ipc {
                 }
                 inited = false;
 
-                timer.stop_timer(timer_id);
-                timer_id = -1;
+                timer.stop_timer(alive_check_timer_id);
+                alive_check_timer_id = -1;
 
                 writing_thread_stopped = true;
                 reading_thread_stopped = true;
@@ -540,23 +546,44 @@ namespace simple::ipc {
                 }
             }
 
-            void on_timer() {
+            void on_alive_check_timer() {
                 auto now = std::chrono::steady_clock::now();
                 auto elapse = std::chrono::duration_cast<std::chrono::seconds>(now - last_recv_time).count();
                 if (elapse > active_connection_lifetime_seconds) {
                     disconnected_callback(this, connection_id);
-                    return;
+                }
+            }
+
+            void on_request_timeout_check_timer() {
+                auto now = std::chrono::steady_clock::now();
+                {
+                    std::unique_lock<std::mutex> lk(waiting_for_response_requests_mutex);
+                    for (auto it = waiting_for_response_requests.begin(); it != waiting_for_response_requests.end(); ) {
+                        if (std::chrono::duration_cast<std::chrono::seconds>(now - it->second.begin_time).count() < it->second.timeout_secs) {
+                            ++it;
+                            continue;
+                        }
+
+                        it->second.callback(nullptr);
+                        it = waiting_for_response_requests.erase(it);
+                    }
                 }
 
-                std::unique_lock<std::mutex> lk(waiting_for_response_requests_mutex);
-                for (auto it = waiting_for_response_requests.begin(); it != waiting_for_response_requests.end(); ) {
-                    if (std::chrono::duration_cast<std::chrono::seconds>(now - it->second.begin_time).count() < it->second.timeout_secs) {
-                        ++it;
-                        break;
-                    }
+                {
+                    std::unique_lock<std::mutex> lk(waiting_for_sending_packets_mutex);
+                    for (auto it = waiting_for_sending_packets.begin(); it != waiting_for_sending_packets.end(); ) {
+                        auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - it->second.begin_time).count();
+                        if (duration < it->second.timeout_secs) {
+                            ++it;
+                            break;
+                        }
 
-                    it->second.callback(nullptr);
-                    it = waiting_for_response_requests.erase(it);
+                        if (it->second.callback) {
+                            it->second.callback(nullptr);
+                        }
+
+                        it = waiting_for_sending_packets.erase(it);
+                    }
                 }
             }
         private:
@@ -564,7 +591,9 @@ namespace simple::ipc {
             bool inited;
 
             timer_mgr_t& timer;
-            int timer_id;
+            int alive_check_timer_id;
+            int request_timeout_check_timer_id;
+
 
             control_block_t *control_block;
 

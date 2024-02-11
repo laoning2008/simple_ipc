@@ -1,4 +1,4 @@
-#include <simple_ipc/client.hpp>
+#include <simple_ipc/ipc/ipc_client.hpp>
 #include <thread>
 #include <csignal>
 #include <iostream>
@@ -14,7 +14,7 @@ void signal_handler(int signal) {
 int main(int argc, char** argv) {
     std::signal(SIGINT, signal_handler);
 
-    simple::ipc::client_t client{server_name};
+    simple::ipc::ipc_client_t client{server_name};
     uint8_t body[] = {'h', 'e', 'l', 'l', 'o', '\0'};
 
     while(!stoped) {
