@@ -15,14 +15,14 @@ namespace simple::ipc {
         return (uint32_t)hasher(rpc_name);
     }
 
-    std::unique_ptr<packet> build_request_packet(const std::string& rpc_name, const google::protobuf::Message& message, const std::string& device_id = {}) {
+    std::unique_ptr<packet> build_request_packet(const std::string& rpc_name, const google::protobuf::Message& message, uint32_t connection_id = 0) {
         uint32_t size = (uint32_t)message.ByteSizeLong();
         ibuffer body{size};
         message.SerializeToArray(body.data(), (int)size);
 
         auto id = rpc_id(rpc_name);
 
-        return build_req_packet(0, id, body.data(), body.size());
+        return build_req_packet(connection_id, id, body.data(), body.size());
     }
 
     template<std::derived_from<google::protobuf::Message> RSP>

@@ -20,8 +20,8 @@ namespace simple::ipc {
                 return conn_mgr.send_packet(std::move(pack), std::move(cb), timeout_secs);
             }
 
-            bool cancel_sending(uint32_t process_id, uint32_t cmd, uint32_t seq) {
-                return conn_mgr.cancel_sending(process_id, cmd, seq);
+            bool cancel_sending(uint32_t connection_id, uint32_t cmd, uint32_t seq) {
+                return conn_mgr.cancel_sending(connection_id, cmd, seq);
             }
 
             void register_request_processor(uint32_t cmd, recv_callback_t cb) {

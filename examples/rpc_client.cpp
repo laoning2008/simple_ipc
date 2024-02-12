@@ -19,6 +19,12 @@ int main(int argc, char** argv) {
     simple::ipc::ipc_client_t ipc_client{server_name};
     simple::ipc::rpc_client_t rpc_client{ipc_client};
 
+    rpc_client.register_handler<add_req, add_rsp>("add_s", [](add_req& req) -> rpc_result<add_rsp> {
+        add_rsp rsp;
+        rsp.set_result(req.left() + req.right());
+        return rpc_result<add_rsp>{rsp};
+    });
+
     while(!stoped) {
         add_req req;
         req.set_left(1);
@@ -32,7 +38,7 @@ int main(int argc, char** argv) {
             }
         });
 
-        std::this_thread::sleep_for(1ms);
+        std::this_thread::sleep_for(1000ms);
     }
     return 0;
 }

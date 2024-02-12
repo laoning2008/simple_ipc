@@ -6,6 +6,7 @@
 
 #include "simple_ipc/detail/connection.hpp"
 #include "simple_ipc/detail/timer.hpp"
+#include <shared_mutex>
 
 using namespace std::placeholders;
 
@@ -25,14 +26,14 @@ namespace simple::ipc {
                     return false;
                 }
 
-                std::unique_lock<std::mutex> lk_conns(connections_mutex);
+                std::unique_lock lk_conns(connections_mutex);
                 connections[connection_id] = std::move(connection);
 
                 return true;
             }
 
             void remove_connection(uint32_t process_id) {
-                std::unique_lock<std::mutex> lk(connections_mutex);
+                std::unique_lock lk(connections_mutex);
                 connections.erase(process_id);
             }
 
@@ -42,7 +43,7 @@ namespace simple::ipc {
 
             bool send_packet(std::unique_ptr<packet> pack, recv_callback_t cb, uint32_t timeout_secs) {
                 uint32_t connection_id = pack->connection_id();
-                std::unique_lock<std::mutex> lk(connections_mutex);
+                std::shared_lock lk(connections_mutex);
                 auto it = connections.find(connection_id);
                 if (it == connections.end()) {
                     return false;
@@ -53,7 +54,7 @@ namespace simple::ipc {
             }
 
             bool cancel_sending(uint32_t connection_id, uint32_t cmd, uint32_t seq) {
-                std::unique_lock<std::mutex> lk(connections_mutex);
+                std::shared_lock lk(connections_mutex);
                 auto it = connections.find(connection_id);
                 if (it == connections.end()) {
                     return false;
@@ -69,12 +70,12 @@ namespace simple::ipc {
             }
 
             void unregister_request_processor(uint32_t cmd) {
-                std::unique_lock<std::mutex> lk(req_processors_mutex);
+                std::unique_lock lk(req_processors_mutex);
                 req_processors.erase(cmd);
             }
         private:
             void on_disconnected(connection_t* conn, uint32_t connection_id) {
-                std::unique_lock<std::mutex> lk(connections_mutex);
+                std::unique_lock lk(connections_mutex);
                 connections.erase(connection_id);
             }
 
@@ -89,7 +90,7 @@ namespace simple::ipc {
             timer_mgr_t timer;
 
             map_process_2_connection_t connections;
-            std::mutex connections_mutex;
+            std::shared_mutex connections_mutex;
 
             map_cmd_2_callback_t req_processors;
             std::mutex req_processors_mutex;
