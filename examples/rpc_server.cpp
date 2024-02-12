@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
             std::cout << "rpc call failed" << std::endl;
         }
 
-        std::this_thread::sleep_for(1000ms);
+        std::this_thread::sleep_for(20ms);
     }
     return 0;
 }
