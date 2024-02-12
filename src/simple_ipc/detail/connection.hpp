@@ -174,7 +174,6 @@ namespace simple::ipc {
                     if (c_lifetime_thread.joinable()) {
                         c_lifetime_thread.join();
                     }
-                    //pthread_mutex_unlock(&control_block->c_lifetime_lock);
                 }
 
                 unmap_shared_memory();
@@ -237,8 +236,8 @@ namespace simple::ipc {
             }
 
             void uninit_control_block() {
-                control_block->c_buf.clear();
-                control_block->s_buf.clear();
+//                control_block->c_buf.clear();
+//                control_block->s_buf.clear();
 
                 uninit_synchronization_objects();
             }
@@ -410,8 +409,10 @@ namespace simple::ipc {
             }
 
             void wait_for_client_finished_uninit_connection() {
-                std::cout << "s lock" << std::endl;
+                std::cout << "wait_for_client_finished_uninit_connection begin" << std::endl;
                 pthread_mutex_lock(&control_block->c_lifetime_lock);
+                pthread_mutex_unlock(&control_block->c_lifetime_lock);
+                std::cout << "wait_for_client_finished_uninit_connection end" << std::endl;
             }
 
             void write_proc() {

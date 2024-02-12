@@ -72,7 +72,7 @@ namespace simple::ipc {
 
             void on_disconnected(connection_t* conn, uint32_t id) {
                 std::cout << "on_disconnected begin" << std::endl;
-                connection.stop();
+                //connection.stop();//on_connected do the job
                 connection_state = state_disconnected;
                 std::cout << "on_disconnected end" << std::endl;
             }
